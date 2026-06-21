@@ -18,13 +18,21 @@ logging.getLogger("pyrogram").setLevel(logging.CRITICAL)
 
 # --- RENDER'I UYANIK TUTMAK İÇİN MİNİ WEB SUNUCUSU ---
 class SaglikKontrolu(BaseHTTPRequestHandler):
+    # Normal tıklatmalar için
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write("Oto-Silici Bot aktif!".encode("utf-8"))
+        self.wfile.write("Bot aktif ve çalışıyor!".encode("utf-8"))
+        
+    # UptimeRobot'un ücretsiz paketindeki tıklatmalar için (YENİ EKLENEN KISIM)
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+        
     def log_message(self, format, *args):
-        return
+        return # Terminal loglarının kirlenmesini önler
 
 def web_sunucusunu_baslat():
     port = int(os.environ.get("PORT", 8080))
