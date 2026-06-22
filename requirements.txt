@@ -1,2 +1,5 @@
 pyrogram
 tgcrypto
+pymongo
+Pillow
+ImageHash
