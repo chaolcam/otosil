@@ -20,7 +20,6 @@ except RuntimeError:
     asyncio.set_event_loop(loop)
 
 from pyrogram import Client, filters
-from pyrogram.enums import ChatMemberStatus
 
 logging.getLogger("pyrogram").setLevel(logging.CRITICAL)
 
@@ -30,7 +29,7 @@ class SaglikKontrolu(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write("Yapay Zeka Destekli Silici Bot aktif!".encode("utf-8"))
+        self.wfile.write("Filtresiz Yapay Zeka Bot aktif!".encode("utf-8"))
     def do_HEAD(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
@@ -57,7 +56,6 @@ MONGO_URI = os.environ.get("MONGO_URI")
 db_client = MongoClient(MONGO_URI)
 db = db_client["telegram_bot_db"]
 hash_koleksiyonu = db["resim_parmak_izleri"]
-# Kaydedilen resimler 30 gün (2592000 saniye) sonra veritabanından otomatik silinir
 hash_koleksiyonu.create_index("kayit_tarihi", expireAfterSeconds=2592000)
 
 # --- VARYASYONLU CAPTION FİLTRESİ ---
@@ -79,19 +77,24 @@ async def mesaj_kontrol(client, message):
     aktif_konu = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_message_id", None)
     if aktif_konu not in [HEDEF_KONU, IKINCI_KONU]: return
 
-    user_id = message.from_user.id if message.from_user else None
+    # ⚠️ YÖNETİCİ (ADMİN) KONTROLÜ TAMAMEN KALDIRILDI! HERKES EŞİT İŞLEME TABİDİR. ⚠️
 
     # --- 3 NUMARALI KONU AYARLARI ---
     if aktif_konu == HEDEF_KONU:
         if message.text:
-            try: await message.delete()
-            except Exception: pass
+            try: 
+                await message.delete()
+                print("🗑️ [Konu 3] Yazı silindi.")
+            except Exception as e: 
+                print(f"❌ Yazı silinemedi: {e}")
             return
         if message.photo or message.video:
             try:
                 await asyncio.sleep(5)
                 await message.delete()
-            except Exception: pass
+                print("🗑️ [Konu 3] Medya 5 saniye sonra silindi.")
+            except Exception as e: 
+                print(f"❌ Medya silinemedi: {e}")
             return
 
     # --- 4 NUMARALI KONU AYARLARI ---
@@ -102,7 +105,8 @@ async def mesaj_kontrol(client, message):
                 try: 
                     await message.delete()
                     print(f"🗑️ [Konu 4] Resim silindi. (Kelime hatası: '{message.caption}')")
-                except Exception: pass
+                except Exception as e: 
+                    print(f"❌ Resim silinemedi: {e}")
                 return
             
             # 2. Aşama: Yapay Zeka Parmak İzi Kontrolü
@@ -123,13 +127,16 @@ async def mesaj_kontrol(client, message):
                     })
                     print(f"✅ [Yeni Resim] Onaylandı ve hafızaya kazındı (Hash: {parmak_izi})")
             except Exception as e:
-                print(f"❌ Görsel işleme hatası: {e}")
+                print(f"❌ Görsel işleme veya silme hatası: {e}")
 
-        # Videolarda sadece kelime kontrolü yapılır, parmak izi alınmaz
+        # Videolarda sadece kelime kontrolü yapılır
         elif message.video:
             if not yakalandi_yazisi_var_mi(message.caption):
-                try: await message.delete()
-                except Exception: pass
+                try: 
+                    await message.delete()
+                    print("🗑️ [Konu 4] Video silindi (Kelime hatası)")
+                except Exception as e: 
+                    print(f"❌ Video silinemedi: {e}")
 
-print("🚀 Yapay zeka hafızalı ve parmak izi kontrollü bot aktif!")
+print("🚀 Admin korumasız, herkesi eşit yargılayan bot aktif!")
 app.run()
