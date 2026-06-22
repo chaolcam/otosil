@@ -80,13 +80,6 @@ async def mesaj_kontrol(client, message):
     if aktif_konu not in [HEDEF_KONU, IKINCI_KONU]: return
 
     user_id = message.from_user.id if message.from_user else None
-    
-    # Yönetici (Admin) Kontrolü
-    if user_id:
-        try:
-            uye_bilgisi = await client.get_chat_member(HEDEF_GRUP_ID, user_id)
-            if uye_bilgisi.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]: return
-        except Exception: pass
 
     # --- 3 NUMARALI KONU AYARLARI ---
     if aktif_konu == HEDEF_KONU:
