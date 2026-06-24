@@ -59,7 +59,6 @@ def sure_cevir(sure_metni):
     if not eslesme: return None, None
     miktar = int(eslesme.group(1))
     birim = eslesme.group(2)
-    
     if birim == 'd': return timedelta(minutes=miktar), f"{miktar} Dakika"
     if birim == 's': return timedelta(hours=miktar), f"{miktar} Saat"
     if birim == 'g': return timedelta(days=miktar), f"{miktar} Gün"
@@ -78,7 +77,6 @@ app = Client("silici_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN
 # ==========================================
 
 async def admin_mi(client, message):
-    # Eğer kullanıcı anonimse veya kanal üzerinden yazıyorsa engelle
     user_id = message.from_user.id if message.from_user else None
     if not user_id: return False
     try:
@@ -87,111 +85,110 @@ async def admin_mi(client, message):
     except:
         return False
 
-@app.on_message(filters.command("mute") & filters.chat(HEDEF_GRUP_ID))
-async def mute_kullanici(client, message):
-    if not await admin_mi(client, message): return
-    args = message.command[1:]
+async def hedefi_dogrula(client, message, args):
     hedef_kullanici = None
-    
     if message.reply_to_message:
+        if not message.reply_to_message.from_user:
+            await message.reply_text("⚠️ **Hata:** Bu mesaj anonim bir yöneticiye veya kanala ait. İşlem yapılamaz.")
+            return None, args
         hedef_kullanici = message.reply_to_message.from_user.id
     else:
         if not args:
-            await message.reply_text("⚠️ Lütfen bir kullanıcı adı/ID belirtin veya mesaja yanıt verin.")
-            return
+            await message.reply_text("⚠️ **Eksik Komut:** Lütfen bir kullanıcı adı/ID belirtin veya mesaja yanıt verin.")
+            return None, args
         hedef = args.pop(0)
         hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
 
+    try:
+        kullanici = await client.get_users(hedef_kullanici)
+        return kullanici.id, args
+    except Exception:
+        await message.reply_text(f"⚠️ **Kullanıcı Bulunamadı:** `{hedef_kullanici}` geçerli değil. Komutu doğru yazdığınızdan emin olun.")
+        return None, args
+
+@app.on_message(filters.command("mute") & filters.chat(HEDEF_GRUP_ID))
+async def mute_kullanici(client, message):
+    if not await admin_mi(client, message): return
+    
+    hedef_id, kalan_args = await hedefi_dogrula(client, message, message.command[1:])
+    if not毀ef_id: return
+
     sure_delta = None; sure_yazi = "Sınırsız"; sebep = ""
-    if args:
-        delta, yazi = sure_cevir(args[0])
+    if kalan_args:
+        delta, yazi = sure_cevir(kalan_args[0])
         if delta:
-            sure_delta = delta; sure_yazi = yazi; args.pop(0)
-        sebep = " ".join(args)
+            sure_delta = delta; sure_yazi = yazi; kalan_args.pop(0)
+        sebep = " ".join(kalan_args)
 
     try:
-        try: await client.delete_user_history(message.chat.id, hedef_kullanici)
-        except Exception: pass
-        
         bitis_zamani = datetime.now() + sure_delta if sure_delta else None
         await client.restrict_chat_member(
-            chat_id=message.chat.id,
-            user_id=hedef_kullanici,
-            permissions=ChatPermissions(can_send_messages=False),
-            until_date=bitis_zamani
+            chat_id=message.chat.id, user_id=hedef_id,
+            permissions=ChatPermissions(can_send_messages=False), until_date=bitis_zamani
         )
-        yanit = f"🔇 **Kullanıcı Mute Yedi ve Geçmişi Silindi!**\n⏱ **Süre:** {sure_yazi}"
+        
+        # ⭐ YENİ: Sadece yanıtlanan o spesifik mesajı siler (Hata vermemesi için korumalı)
+        if message.reply_to_message:
+            try: await message.reply_to_message.delete()
+            except Exception: pass
+
+        yanit = f"🔇 **Kullanıcı Susturuldu!**\n⏱ **Süre:** {sure_yazi}"
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
     except Exception as e:
-        # DETAYLI HATA BİLDİRİMİ EKLENDİ
-        await message.reply_text(f"❌ İşlem başarısız!\n**Telegram Hatası:** `{e}`")
+        await message.reply_text(f"❌ İşlem başarısız! (Botun yetkisi yok veya başka bir admini kısıtlamaya çalışıyorsunuz)")
 
 @app.on_message(filters.command("unmute") & filters.chat(HEDEF_GRUP_ID))
 async def unmute_kullanici(client, message):
     if not await admin_mi(client, message): return
-    args = message.command[1:]
-    hedef_kullanici = None
-    if message.reply_to_message: hedef_kullanici = message.reply_to_message.from_user.id
-    else:
-        if not args:
-            await message.reply_text("⚠️ Lütfen bir kullanıcı adı/ID belirtin veya mesaja yanıt verin.")
-            return
-        hedef = args.pop(0)
-        hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
+    
+    hedef_id, _ = await hedefi_dogrula(client, message, message.command[1:])
+    if not hedef_id: return
 
     try:
         await client.restrict_chat_member(
-            chat_id=message.chat.id, user_id=hedef_kullanici,
+            chat_id=message.chat.id, user_id=hedef_id,
             permissions=ChatPermissions(can_send_messages=True, can_send_media_messages=True, can_send_other_messages=True, can_add_web_page_previews=True, can_send_polls=True, can_invite_users=True)
         )
         await message.reply_text("🔊 **Kullanıcının susturması (mute) kaldırıldı!**")
     except Exception as e:
-        await message.reply_text(f"❌ İşlem başarısız!\n**Telegram Hatası:** `{e}`")
+        await message.reply_text(f"❌ İşlem başarısız! (Kullanıcı bulunamıyor veya yetki hatası)")
 
 @app.on_message(filters.command("ban") & filters.chat(HEDEF_GRUP_ID))
 async def ban_kullanici(client, message):
     if not await admin_mi(client, message): return
-    args = message.command[1:]
-    hedef_kullanici = None; sebep = ""
-    if message.reply_to_message:
-        hedef_kullanici = message.reply_to_message.from_user.id; sebep = " ".join(args)
-    else:
-        if not args:
-            await message.reply_text("⚠️ Lütfen bir kullanıcı adı/ID belirtin veya mesaja yanıt verin.")
-            return
-        hedef = args.pop(0)
-        hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
-        sebep = " ".join(args)
+    
+    hedef_id, kalan_args = await hedefi_dogrula(client, message, message.command[1:])
+    if not hedef_id: return
+
+    sebep = " ".join(kalan_args)
 
     try:
-        try: await client.delete_user_history(message.chat.id, hedef_kullanici)
-        except Exception: pass
-        await client.ban_chat_member(message.chat.id, hedef_kullanici)
-        yanit = f"🔨 **Kullanıcı Uzaklaştırıldı ve Geçmişi Silindi!**"
+        await client.ban_chat_member(message.chat.id, hedef_id)
+        
+        # ⭐ YENİ: Sadece yanıtlanan o spesifik mesajı siler (Hata vermemesi için korumalı)
+        if message.reply_to_message:
+            try: await message.reply_to_message.delete()
+            except Exception: pass
+
+        yanit = f"🔨 **Kullanıcı Uzaklaştırıldı!**"
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
     except Exception as e:
-        await message.reply_text(f"❌ İşlem başarısız!\n**Telegram Hatası:** `{e}`")
+        await message.reply_text(f"❌ İşlem başarısız! (Botun yetkisi yok veya başka bir admini yasaklamaya çalışıyorsunuz)")
 
 @app.on_message(filters.command("unban") & filters.chat(HEDEF_GRUP_ID))
 async def unban_kullanici(client, message):
     if not await admin_mi(client, message): return
-    args = message.command[1:]
-    hedef_kullanici = None
-    if message.reply_to_message: hedef_kullanici = message.reply_to_message.from_user.id
-    else:
-        if not args:
-            await message.reply_text("⚠️ Lütfen bir kullanıcı adı/ID belirtin veya mesaja yanıt verin.")
-            return
-        hedef = args.pop(0)
-        hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
+    
+    hedef_id, _ = await hedefi_dogrula(client, message, message.command[1:])
+    if not hedef_id: return
 
     try:
-        await client.unban_chat_member(message.chat.id, hedef_kullanici)
+        await client.unban_chat_member(message.chat.id, hedef_id)
         await message.reply_text("🔓 **Kullanıcının yasaklaması (ban) kaldırıldı!**")
     except Exception as e:
-        await message.reply_text(f"❌ İşlem başarısız!\n**Telegram Hatası:** `{e}`")
+        await message.reply_text(f"❌ İşlem başarısız! (Kullanıcı listede yok veya yetki hatası)")
 
 # ==========================================
 # --- OTOMATİK KONU TEMİZLEYİCİ ---
@@ -224,5 +221,5 @@ async def mesaj_kontrol(client, message):
                 try: await message.delete()
                 except Exception: pass
 
-print("🚀 Hata Raporlamalı Komut Botu Aktif!")
+print("🚀 Nokta Atışı Yanıt Silme Özellikli Bot Aktif!")
 app.run()
