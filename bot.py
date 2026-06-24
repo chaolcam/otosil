@@ -1,16 +1,8 @@
 import os
 import asyncio
 import logging
-import io
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
-
-# --- GÖRÜNTÜ İŞLEME VE VERİTABANI KÜTÜPHANELERİ ---
-from PIL import Image
-import imagehash
-from pymongo import MongoClient
-import pymongo
-import datetime
 
 # --- PYTHON 3.14+ YAMASI ---
 try:
@@ -20,6 +12,7 @@ except RuntimeError:
     asyncio.set_event_loop(loop)
 
 from pyrogram import Client, filters
+from pyrogram.enums import ChatMemberStatus
 
 logging.getLogger("pyrogram").setLevel(logging.CRITICAL)
 
@@ -29,7 +22,7 @@ class SaglikKontrolu(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write("Filtresiz Yapay Zeka Bot aktif!".encode("utf-8"))
+        self.wfile.write("Admin Korumalı Silici Bot aktif!".encode("utf-8"))
     def do_HEAD(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
@@ -50,13 +43,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 HEDEF_GRUP_ID = int(os.environ.get("HEDEF_GRUP_ID"))
 HEDEF_KONU = int(os.environ.get("HEDEF_KONU"))
 IKINCI_KONU = int(os.environ.get("IKINCI_KONU"))
-MONGO_URI = os.environ.get("MONGO_URI")
-
-# --- MONGODB BAĞLANTISI VE OTOMATİK TEMİZLİK ---
-db_client = MongoClient(MONGO_URI)
-db = db_client["telegram_bot_db"]
-hash_koleksiyonu = db["resim_parmak_izleri"]
-hash_koleksiyonu.create_index("kayit_tarihi", expireAfterSeconds=2592000)
 
 # --- VARYASYONLU CAPTION FİLTRESİ ---
 def yakalandi_yazisi_var_mi(caption_text):
@@ -75,16 +61,29 @@ app = Client("silici_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN
 @app.on_message(filters.chat(HEDEF_GRUP_ID))
 async def mesaj_kontrol(client, message):
     aktif_konu = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_message_id", None)
+    
+    # Konu 1 veya Main boş gelebilir diye güvenlik önlemi
+    if aktif_konu is None or aktif_konu == 0:
+        aktif_konu = 1
+
     if aktif_konu not in [HEDEF_KONU, IKINCI_KONU]: return
 
-    # ⚠️ YÖNETİCİ (ADMİN) KONTROLÜ TAMAMEN KALDIRILDI! HERKES EŞİT İŞLEME TABİDİR. ⚠️
+    # --- YÖNETİCİ (ADMİN) KONTROLÜ ---
+    user_id = message.from_user.id if message.from_user else None
+    if user_id:
+        try:
+            uye_bilgisi = await client.get_chat_member(HEDEF_GRUP_ID, user_id)
+            if uye_bilgisi.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]: 
+                return # Admin ise hiçbir işlem yapmadan doğrudan çık
+        except Exception: 
+            pass
 
-    # --- 3 NUMARALI KONU AYARLARI ---
+    # --- İLK HEDEF KONU AYARLARI (5 Saniye / Anında Silme) ---
     if aktif_konu == HEDEF_KONU:
         if message.text:
             try: 
                 await message.delete()
-                print("🗑️ [Konu 3] Yazı silindi.")
+                print("🗑️ [1. Konu] Yazı silindi.")
             except Exception as e: 
                 print(f"❌ Yazı silinemedi: {e}")
             return
@@ -92,51 +91,23 @@ async def mesaj_kontrol(client, message):
             try:
                 await asyncio.sleep(5)
                 await message.delete()
-                print("🗑️ [Konu 3] Medya 5 saniye sonra silindi.")
+                print("🗑️ [1. Konu] Medya 5 saniye sonra silindi.")
             except Exception as e: 
                 print(f"❌ Medya silinemedi: {e}")
             return
 
-    # --- 4 NUMARALI KONU AYARLARI ---
+    # --- İKİNCİ KONU AYARLARI (Sadece Kelime Kontrolü) ---
     elif aktif_konu == IKINCI_KONU:
-        if message.photo:
-            # 1. Aşama: Kelime Kontrolü
+        if message.photo or message.video:
+            # Sadece Caption'ı kontrol et (Parmak izi yok)
             if not yakalandi_yazisi_var_mi(message.caption):
                 try: 
                     await message.delete()
-                    print(f"🗑️ [Konu 4] Resim silindi. (Kelime hatası: '{message.caption}')")
+                    print(f"🗑️ [2. Konu] Medya silindi. (Kelime hatası: '{message.caption}')")
                 except Exception as e: 
-                    print(f"❌ Resim silinemedi: {e}")
-                return
-            
-            # 2. Aşama: Yapay Zeka Parmak İzi Kontrolü
-            try:
-                resim_verisi = await client.download_media(message, in_memory=True)
-                img = Image.open(resim_verisi)
-                parmak_izi = str(imagehash.phash(img))
-                
-                eski_kayit = hash_koleksiyonu.find_one({"parmak_izi": parmak_izi})
-                
-                if eski_kayit:
-                    await message.delete()
-                    print(f"♻️ [Kopya Yakalandı] Daha önce atılmış bir resim tespit edildi ve silindi!")
-                else:
-                    hash_koleksiyonu.insert_one({
-                        "parmak_izi": parmak_izi,
-                        "kayit_tarihi": datetime.datetime.utcnow()
-                    })
-                    print(f"✅ [Yeni Resim] Onaylandı ve hafızaya kazındı (Hash: {parmak_izi})")
-            except Exception as e:
-                print(f"❌ Görsel işleme veya silme hatası: {e}")
+                    print(f"❌ Medya silinemedi: {e}")
+            else:
+                print("✅ [2. Konu] Medya onaylandı (Kelime doğru).")
 
-        # Videolarda sadece kelime kontrolü yapılır
-        elif message.video:
-            if not yakalandi_yazisi_var_mi(message.caption):
-                try: 
-                    await message.delete()
-                    print("🗑️ [Konu 4] Video silindi (Kelime hatası)")
-                except Exception as e: 
-                    print(f"❌ Video silinemedi: {e}")
-
-print("🚀 Admin korumasız, herkesi eşit yargılayan bot aktif!")
+print("🚀 Admin korumalı ve sadeleştirilmiş bot aktif!")
 app.run()
