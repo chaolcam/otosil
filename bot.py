@@ -74,7 +74,7 @@ loop.set_exception_handler(susturucu)
 app = Client("silici_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # ==========================================
-# --- MODERASYON KOMUTLARI (BAN & MUTE) ---
+# --- MODERASYON KOMUTLARI (BAN, MUTE, UNMUTE) ---
 # ==========================================
 
 async def admin_mi(client, message):
@@ -93,7 +93,6 @@ async def mute_kullanici(client, message):
     args = message.command[1:]
     hedef_kullanici = None
     
-    # 1. Hedefi Belirle (Yanıt, Kullanıcı Adı veya ID)
     if message.reply_to_message:
         hedef_kullanici = message.reply_to_message.from_user.id
     else:
@@ -103,7 +102,6 @@ async def mute_kullanici(client, message):
         hedef = args.pop(0)
         hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
 
-    # 2. Süre ve Sebep Belirle
     sure_delta = None
     sure_yazi = "Sınırsız"
     sebep = ""
@@ -113,10 +111,9 @@ async def mute_kullanici(client, message):
         if delta:
             sure_delta = delta
             sure_yazi = yazi
-            args.pop(0) # Süreyi listeden çıkar, kalanlar sebep olacak
+            args.pop(0) 
         sebep = " ".join(args)
 
-    # 3. Mute İşlemini Uygula
     try:
         bitis_zamani = datetime.now() + sure_delta if sure_delta else None
         await client.restrict_chat_member(
@@ -133,6 +130,40 @@ async def mute_kullanici(client, message):
     except Exception as e:
         await message.reply_text(f"❌ İşlem başarısız (Botun yetkisi yok veya başka bir admini işlemeye çalıştınız).")
 
+@app.on_message(filters.command("unmute") & filters.chat(HEDEF_GRUP_ID))
+async def unmute_kullanici(client, message):
+    if not await admin_mi(client, message): return
+    
+    args = message.command[1:]
+    hedef_kullanici = None
+    
+    if message.reply_to_message:
+        hedef_kullanici = message.reply_to_message.from_user.id
+    else:
+        if not args:
+            await message.reply_text("⚠️ Lütfen bir kullanıcı adı/ID belirtin veya mesaja yanıt verin.")
+            return
+        hedef = args.pop(0)
+        hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
+
+    try:
+        # Kullanıcının tüm standart yetkilerini (mesaj, medya atma vb.) geri veriyoruz
+        await client.restrict_chat_member(
+            chat_id=message.chat.id,
+            user_id=hedef_kullanici,
+            permissions=ChatPermissions(
+                can_send_messages=True,
+                can_send_media_messages=True,
+                can_send_other_messages=True,
+                can_add_web_page_previews=True,
+                can_send_polls=True,
+                can_invite_users=True
+            )
+        )
+        await message.reply_text("🔊 **Kullanıcının susturması (mute) kaldırıldı!** Artık gruba mesaj gönderebilir.")
+    except Exception as e:
+        await message.reply_text(f"❌ İşlem başarısız (Botun yetkisi yok veya kullanıcı grupta bulunamıyor).")
+
 @app.on_message(filters.command("ban") & filters.chat(HEDEF_GRUP_ID))
 async def ban_kullanici(client, message):
     if not await admin_mi(client, message): return
@@ -141,7 +172,6 @@ async def ban_kullanici(client, message):
     hedef_kullanici = None
     sebep = ""
     
-    # 1. Hedefi Belirle
     if message.reply_to_message:
         hedef_kullanici = message.reply_to_message.from_user.id
         sebep = " ".join(args)
@@ -153,7 +183,6 @@ async def ban_kullanici(client, message):
         hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
         sebep = " ".join(args)
 
-    # 2. Ban İşlemini Uygula
     try:
         await client.ban_chat_member(message.chat.id, hedef_kullanici)
         yanit = f"🔨 **Kullanıcı Gruptan Uzaklaştırıldı!**"
@@ -167,7 +196,7 @@ async def ban_kullanici(client, message):
 # --- OTOMATİK KONU TEMİZLEYİCİ (MODERASYON) ---
 # ==========================================
 
-@app.on_message(filters.chat(HEDEF_GRUP_ID) & ~filters.command(["mute", "ban"]))
+@app.on_message(filters.chat(HEDEF_GRUP_ID) & ~filters.command(["mute", "unmute", "ban"]))
 async def mesaj_kontrol(client, message):
     aktif_konu = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_message_id", None)
     
@@ -200,5 +229,5 @@ async def mesaj_kontrol(client, message):
                 try: await message.delete()
                 except Exception: pass
 
-print("🚀 Komut Destekli, Admin Korumalı ve Sadeleştirilmiş bot aktif!")
+print("🚀 Komut Destekli (Mute/Unmute/Ban), Admin Korumalı ve Sadeleştirilmiş bot aktif!")
 app.run()
