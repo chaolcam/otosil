@@ -74,7 +74,7 @@ loop.set_exception_handler(susturucu)
 app = Client("silici_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # ==========================================
-# --- MODERASYON KOMUTLARI (BAN, MUTE, UNMUTE) ---
+# --- MODERASYON KOMUTLARI (BAN, UNBAN, MUTE, UNMUTE) ---
 # ==========================================
 
 async def admin_mi(client, message):
@@ -115,6 +115,13 @@ async def mute_kullanici(client, message):
         sebep = " ".join(args)
 
     try:
+        # 1. Önce kişinin gruptaki TÜM geçmişini (mesaj, resim vb.) siliyoruz
+        try:
+            await client.delete_user_history(message.chat.id, hedef_kullanici)
+        except Exception as e:
+            print(f"Geçmiş silinirken ufak bir sorun oluştu: {e}")
+
+        # 2. Sonra kişiye Mute atıyoruz
         bitis_zamani = datetime.now() + sure_delta if sure_delta else None
         await client.restrict_chat_member(
             chat_id=message.chat.id,
@@ -123,7 +130,7 @@ async def mute_kullanici(client, message):
             until_date=bitis_zamani
         )
         
-        yanit = f"🔇 **Kullanıcı Mute Yedi!**\n⏱ **Süre:** {sure_yazi}"
+        yanit = f"🔇 **Kullanıcı Mute Yedi ve Tüm Geçmişi Silindi!**\n⏱ **Süre:** {sure_yazi}"
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
         
@@ -147,7 +154,6 @@ async def unmute_kullanici(client, message):
         hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
 
     try:
-        # Kullanıcının tüm standart yetkilerini (mesaj, medya atma vb.) geri veriyoruz
         await client.restrict_chat_member(
             chat_id=message.chat.id,
             user_id=hedef_kullanici,
@@ -184,19 +190,48 @@ async def ban_kullanici(client, message):
         sebep = " ".join(args)
 
     try:
+        # 1. Önce kişinin gruptaki TÜM geçmişini (mesaj, resim vb.) siliyoruz
+        try:
+            await client.delete_user_history(message.chat.id, hedef_kullanici)
+        except Exception as e:
+            print(f"Geçmiş silinirken ufak bir sorun oluştu: {e}")
+
+        # 2. Sonra kişiyi Banlıyoruz
         await client.ban_chat_member(message.chat.id, hedef_kullanici)
-        yanit = f"🔨 **Kullanıcı Gruptan Uzaklaştırıldı!**"
+        yanit = f"🔨 **Kullanıcı Gruptan Uzaklaştırıldı ve Tüm Geçmişi Silindi!**"
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
     except Exception as e:
         await message.reply_text(f"❌ İşlem başarısız (Botun yetkisi yok veya başka bir admini işlemeye çalıştınız).")
+
+@app.on_message(filters.command("unban") & filters.chat(HEDEF_GRUP_ID))
+async def unban_kullanici(client, message):
+    if not await admin_mi(client, message): return
+    
+    args = message.command[1:]
+    hedef_kullanici = None
+    
+    if message.reply_to_message:
+        hedef_kullanici = message.reply_to_message.from_user.id
+    else:
+        if not args:
+            await message.reply_text("⚠️ Lütfen bir kullanıcı adı/ID belirtin veya mesaja yanıt verin.")
+            return
+        hedef = args.pop(0)
+        hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
+
+    try:
+        await client.unban_chat_member(message.chat.id, hedef_kullanici)
+        await message.reply_text("🔓 **Kullanıcının yasaklaması (ban) kaldırıldı!** Artık gruba tekrar katılabilir.")
+    except Exception as e:
+        await message.reply_text(f"❌ İşlem başarısız (Botun yetkisi yok veya kullanıcı bulunamadı).")
 
 
 # ==========================================
 # --- OTOMATİK KONU TEMİZLEYİCİ (MODERASYON) ---
 # ==========================================
 
-@app.on_message(filters.chat(HEDEF_GRUP_ID) & ~filters.command(["mute", "unmute", "ban"]))
+@app.on_message(filters.chat(HEDEF_GRUP_ID) & ~filters.command(["mute", "unmute", "ban", "unban"]))
 async def mesaj_kontrol(client, message):
     aktif_konu = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_message_id", None)
     
@@ -205,29 +240,37 @@ async def mesaj_kontrol(client, message):
 
     if aktif_konu not in [HEDEF_KONU, IKINCI_KONU]: return
 
-    # YÖNETİCİ KONTROLÜ
-    if await admin_mi(client, message):
-        return
+    is_admin = await admin_mi(client, message)
 
-    # İLK HEDEF KONU (5 Saniye / Anında Silme)
+    # --- İLK HEDEF KONU (5 Saniye / Anında Silme) ---
     if aktif_konu == HEDEF_KONU:
         if message.text:
-            try: await message.delete()
-            except Exception: pass
-            return
-        if message.photo or message.video:
-            try:
-                await asyncio.sleep(5)
+            if is_admin:
+                return  # Admin yazısına DOKUNMA
+            try: 
                 await message.delete()
             except Exception: pass
             return
+            
+        if message.photo or message.video:
+            # Kim atarsa atsın 5 saniye sonra silinir (Admin dahil).
+            try:
+                await asyncio.sleep(5)
+                await message.delete()
+                print("🗑️ [1. Konu] Medya 5 saniye sonra silindi (Admin dahil).")
+            except Exception as e: 
+                print(f"❌ Medya silinemedi: {e}")
+            return
 
-    # İKİNCİ KONU (Sadece Kelime Kontrolü)
+    # --- İKİNCİ KONU (Sadece Kelime Kontrolü) ---
     elif aktif_konu == IKINCI_KONU:
+        if is_admin:
+            return  # Adminler kelime kuralından MUAFTIR
+            
         if message.photo or message.video:
             if not yakalandi_yazisi_var_mi(message.caption):
                 try: await message.delete()
                 except Exception: pass
 
-print("🚀 Komut Destekli (Mute/Unmute/Ban), Admin Korumalı ve Sadeleştirilmiş bot aktif!")
+print("🚀 Temizlik Operasyonlu Komut Destekli Bot Aktif!")
 app.run()
