@@ -108,8 +108,9 @@ async def hedefi_dogrula(client, message, args):
         hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
 
     try:
+        # Sadece ID'yi değil, kişinin tüm verisini (ismi, soyismi vs.) döndürüyoruz
         kullanici = await client.get_users(hedef_kullanici)
-        return kullanici.id, args
+        return kullanici, args
     except Exception as e:
         await message.reply_text(f"⚠️ **Kullanıcı Bulunamadı:** `{hedef_kullanici}` geçerli değil.\nHata Detayı: {e}")
         return None, args
@@ -118,8 +119,13 @@ async def hedefi_dogrula(client, message, args):
 async def mute_kullanici(client, message):
     if not await admin_mi(client, message): return
     
-    hedef_id, kalan_args = await hedefi_dogrula(client, message, message.command[1:])
-    if not hedef_id: return
+    hedef_kullanici, kalan_args = await hedefi_dogrula(client, message, message.command[1:])
+    if not hedef_kullanici: return
+
+    # Yönlendirmeli isim (Mention) oluşturma
+    hedef_id = hedef_kullanici.id
+    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
+    user_link = f"[{hedef_isim}](tg://user?id={hedef_id})"
 
     sure_delta = None; sure_yazi = "Sınırsız"; sebep = ""
     if kalan_args:
@@ -129,33 +135,24 @@ async def mute_kullanici(client, message):
         sebep = " ".join(kalan_args)
 
     try:
-        # BUG ÇÖZÜMÜ: Telegram 366 günden sonrasını "Süresiz" sayar. Pyrogram hatasını aşmak için 400 gün veriyoruz.
         bitis_zamani = datetime.now() + sure_delta if sure_delta else datetime.now() + timedelta(days=400)
         
-        # Tüm izinleri açıkça False yapıyoruz ki içeride None kalmasın
         kisitlama_izinleri = ChatPermissions(
-            can_send_messages=False,
-            can_send_media_messages=False,
-            can_send_other_messages=False,
-            can_send_polls=False,
-            can_add_web_page_previews=False,
-            can_invite_users=False,
-            can_change_info=False,
-            can_pin_messages=False
+            can_send_messages=False, can_send_media_messages=False, can_send_other_messages=False,
+            can_send_polls=False, can_add_web_page_previews=False, can_invite_users=False,
+            can_change_info=False, can_pin_messages=False
         )
         
         await client.restrict_chat_member(
-            chat_id=message.chat.id, 
-            user_id=hedef_id,
-            permissions=kisitlama_izinleri, 
-            until_date=bitis_zamani
+            chat_id=message.chat.id, user_id=hedef_id,
+            permissions=kisitlama_izinleri, until_date=bitis_zamani
         )
         
         if message.reply_to_message:
             try: await message.reply_to_message.delete()
             except Exception: pass
 
-        yanit = f"🔇 **Kullanıcı Susturuldu!**\n⏱ **Süre:** {sure_yazi}"
+        yanit = f"🔇 {user_link} **Susturuldu!**\n⏱ **Süre:** {sure_yazi}"
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
     except Exception as e:
@@ -165,23 +162,22 @@ async def mute_kullanici(client, message):
 async def unmute_kullanici(client, message):
     if not await admin_mi(client, message): return
     
-    hedef_id, _ = await hedefi_dogrula(client, message, message.command[1:])
-    if not hedef_id: return
+    hedef_kullanici, _ = await hedefi_dogrula(client, message, message.command[1:])
+    if not hedef_kullanici: return
+
+    hedef_id = hedef_kullanici.id
+    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
+    user_link = f"[{hedef_isim}](tg://user?id={hedef_id})"
 
     try:
         await client.restrict_chat_member(
-            chat_id=message.chat.id, 
-            user_id=hedef_id,
+            chat_id=message.chat.id, user_id=hedef_id,
             permissions=ChatPermissions(
-                can_send_messages=True, 
-                can_send_media_messages=True, 
-                can_send_other_messages=True, 
-                can_add_web_page_previews=True, 
-                can_send_polls=True, 
-                can_invite_users=True
+                can_send_messages=True, can_send_media_messages=True, can_send_other_messages=True, 
+                can_add_web_page_previews=True, can_send_polls=True, can_invite_users=True
             )
         )
-        await message.reply_text("🔊 **Kullanıcının susturması (mute) kaldırıldı!**")
+        await message.reply_text(f"🔊 {user_link} **adlı kullanıcının susturması kaldırıldı!**")
     except Exception as e:
         await message.reply_text(f"❌ **Unmute İşlemi Başarısız!**\nTelegram'ın verdiği hata kodu:\n`{e}`")
 
@@ -189,8 +185,12 @@ async def unmute_kullanici(client, message):
 async def ban_kullanici(client, message):
     if not await admin_mi(client, message): return
     
-    hedef_id, kalan_args = await hedefi_dogrula(client, message, message.command[1:])
-    if not hedef_id: return
+    hedef_kullanici, kalan_args = await hedefi_dogrula(client, message, message.command[1:])
+    if not hedef_kullanici: return
+
+    hedef_id = hedef_kullanici.id
+    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
+    user_link = f"[{hedef_isim}](tg://user?id={hedef_id})"
 
     sebep = " ".join(kalan_args)
 
@@ -201,7 +201,7 @@ async def ban_kullanici(client, message):
             try: await message.reply_to_message.delete()
             except Exception: pass
 
-        yanit = f"🔨 **Kullanıcı Uzaklaştırıldı!**"
+        yanit = f"🔨 {user_link} **Uzaklaştırıldı!**"
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
     except Exception as e:
@@ -211,12 +211,16 @@ async def ban_kullanici(client, message):
 async def unban_kullanici(client, message):
     if not await admin_mi(client, message): return
     
-    hedef_id, _ = await hedefi_dogrula(client, message, message.command[1:])
-    if not hedef_id: return
+    hedef_kullanici, _ = await hedefi_dogrula(client, message, message.command[1:])
+    if not hedef_kullanici: return
+
+    hedef_id = hedef_kullanici.id
+    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
+    user_link = f"[{hedef_isim}](tg://user?id={hedef_id})"
 
     try:
         await client.unban_chat_member(message.chat.id, hedef_id)
-        await message.reply_text("🔓 **Kullanıcının yasaklaması (ban) kaldırıldı!**")
+        await message.reply_text(f"🔓 {user_link} **adlı kullanıcının yasaklaması kaldırıldı!**")
     except Exception as e:
         await message.reply_text(f"❌ **Unban İşlemi Başarısız!**\nTelegram'ın verdiği hata kodu:\n`{e}`")
 
@@ -265,5 +269,5 @@ async def mesaj_kontrol(client, message):
                 try: await message.delete()
                 except Exception: pass
 
-print("🚀 Bot tüm Pyrogram hatalarından arındırılmış şekilde Aktif!")
+print("🚀 Bot isim etiketleme özellikleriyle Aktif!")
 app.run()
