@@ -129,12 +129,26 @@ async def mute_kullanici(client, message):
         sebep = " ".join(kalan_args)
 
     try:
-        # None yerine 0 kullanıldı (Sınırsız mute işlemi için)
-        bitis_zamani = datetime.now() + sure_delta if sure_delta else 0
+        # BUG ÇÖZÜMÜ: Telegram 366 günden sonrasını "Süresiz" sayar. Pyrogram hatasını aşmak için 400 gün veriyoruz.
+        bitis_zamani = datetime.now() + sure_delta if sure_delta else datetime.now() + timedelta(days=400)
+        
+        # Tüm izinleri açıkça False yapıyoruz ki içeride None kalmasın
+        kisitlama_izinleri = ChatPermissions(
+            can_send_messages=False,
+            can_send_media_messages=False,
+            can_send_other_messages=False,
+            can_send_polls=False,
+            can_add_web_page_previews=False,
+            can_invite_users=False,
+            can_change_info=False,
+            can_pin_messages=False
+        )
         
         await client.restrict_chat_member(
-            chat_id=message.chat.id, user_id=hedef_id,
-            permissions=ChatPermissions(can_send_messages=False), until_date=bitis_zamani
+            chat_id=message.chat.id, 
+            user_id=hedef_id,
+            permissions=kisitlama_izinleri, 
+            until_date=bitis_zamani
         )
         
         if message.reply_to_message:
@@ -156,8 +170,16 @@ async def unmute_kullanici(client, message):
 
     try:
         await client.restrict_chat_member(
-            chat_id=message.chat.id, user_id=hedef_id,
-            permissions=ChatPermissions(can_send_messages=True, can_send_media_messages=True, can_send_other_messages=True, can_add_web_page_previews=True, can_send_polls=True, can_invite_users=True)
+            chat_id=message.chat.id, 
+            user_id=hedef_id,
+            permissions=ChatPermissions(
+                can_send_messages=True, 
+                can_send_media_messages=True, 
+                can_send_other_messages=True, 
+                can_add_web_page_previews=True, 
+                can_send_polls=True, 
+                can_invite_users=True
+            )
         )
         await message.reply_text("🔊 **Kullanıcının susturması (mute) kaldırıldı!**")
     except Exception as e:
@@ -243,5 +265,5 @@ async def mesaj_kontrol(client, message):
                 try: await message.delete()
                 except Exception: pass
 
-print("🚀 Bot tüm düzeltmelerle Aktif!")
+print("🚀 Bot tüm Pyrogram hatalarından arındırılmış şekilde Aktif!")
 app.run()
