@@ -80,8 +80,13 @@ app = Client("silici_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN
 # ==========================================
 
 async def admin_mi(client, message):
+    # Eğer mesajı gönderen kişi yoksa ama mesaj grup adına atılmışsa (Anonim Admin)
+    if message.sender_chat and message.sender_chat.id == message.chat.id:
+        return True
+
     user_id = message.from_user.id if message.from_user else None
     if not user_id: return False
+    
     try:
         uye = await client.get_chat_member(message.chat.id, user_id)
         return uye.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
@@ -105,8 +110,8 @@ async def hedefi_dogrula(client, message, args):
     try:
         kullanici = await client.get_users(hedef_kullanici)
         return kullanici.id, args
-    except Exception:
-        await message.reply_text(f"⚠️ **Kullanıcı Bulunamadı:** `{hedef_kullanici}` geçerli değil. Komutu doğru yazdığınızdan emin olun.")
+    except Exception as e:
+        await message.reply_text(f"⚠️ **Kullanıcı Bulunamadı:** `{hedef_kullanici}` geçerli değil.\nHata Detayı: {e}")
         return None, args
 
 @app.on_message(filters.command("mute") & filters.chat(HEDEF_GRUP_ID))
@@ -138,7 +143,8 @@ async def mute_kullanici(client, message):
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
     except Exception as e:
-        await message.reply_text(f"❌ İşlem başarısız! (Botun yetkisi yok veya başka bir admini kısıtlamaya çalışıyorsunuz)")
+        # GERÇEK HATAYI YAZDIRIYORUZ
+        await message.reply_text(f"❌ **Mute İşlemi Başarısız!**\nTelegram'ın verdiği hata kodu:\n`{e}`")
 
 @app.on_message(filters.command("unmute") & filters.chat(HEDEF_GRUP_ID))
 async def unmute_kullanici(client, message):
@@ -154,7 +160,7 @@ async def unmute_kullanici(client, message):
         )
         await message.reply_text("🔊 **Kullanıcının susturması (mute) kaldırıldı!**")
     except Exception as e:
-        await message.reply_text(f"❌ İşlem başarısız! (Kullanıcı bulunamıyor veya yetki hatası)")
+        await message.reply_text(f"❌ **Unmute İşlemi Başarısız!**\nTelegram'ın verdiği hata kodu:\n`{e}`")
 
 @app.on_message(filters.command("ban") & filters.chat(HEDEF_GRUP_ID))
 async def ban_kullanici(client, message):
@@ -176,7 +182,7 @@ async def ban_kullanici(client, message):
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
     except Exception as e:
-        await message.reply_text(f"❌ İşlem başarısız! (Botun yetkisi yok veya başka bir admini yasaklamaya çalışıyorsunuz)")
+        await message.reply_text(f"❌ **Ban İşlemi Başarısız!**\nTelegram'ın verdiği hata kodu:\n`{e}`")
 
 @app.on_message(filters.command("unban") & filters.chat(HEDEF_GRUP_ID))
 async def unban_kullanici(client, message):
@@ -189,7 +195,7 @@ async def unban_kullanici(client, message):
         await client.unban_chat_member(message.chat.id, hedef_id)
         await message.reply_text("🔓 **Kullanıcının yasaklaması (ban) kaldırıldı!**")
     except Exception as e:
-        await message.reply_text(f"❌ İşlem başarısız! (Kullanıcı listede yok veya yetki hatası)")
+        await message.reply_text(f"❌ **Unban İşlemi Başarısız!**\nTelegram'ın verdiği hata kodu:\n`{e}`")
 
 # ==========================================
 # --- OTOMATİK KONU TEMİZLEYİCİ ---
@@ -240,5 +246,5 @@ async def mesaj_kontrol(client, message):
                 try: await message.delete()
                 except Exception: pass
 
-print("🚀 Nokta Atışı Yanıt Silme ve Albüm Korumalı Bot Aktif!")
+print("🚀 Nokta Atışı Yanıt Silme, Albüm Korumalı ve Hata Ayıklamalı Bot Aktif!")
 app.run()
