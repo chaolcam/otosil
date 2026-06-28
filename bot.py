@@ -19,7 +19,7 @@ from pyrogram.types import ChatPermissions
 
 logging.getLogger("pyrogram").setLevel(logging.CRITICAL)
 
-# --- WEB SUNUCUSU ---
+# --- WEB SUNUCUSU (7/24 Aktiflik İçin) ---
 class SaglikKontrolu(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -80,7 +80,7 @@ app = Client("silici_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN
 # ==========================================
 
 async def admin_mi(client, message):
-    # Eğer mesajı gönderen kişi yoksa ama mesaj grup adına atılmışsa (Anonim Admin)
+    # Anonim Admin Kontrolü
     if message.sender_chat and message.sender_chat.id == message.chat.id:
         return True
 
@@ -129,7 +129,9 @@ async def mute_kullanici(client, message):
         sebep = " ".join(kalan_args)
 
     try:
-        bitis_zamani = datetime.now() + sure_delta if sure_delta else None
+        # None yerine 0 kullanıldı (Sınırsız mute işlemi için)
+        bitis_zamani = datetime.now() + sure_delta if sure_delta else 0
+        
         await client.restrict_chat_member(
             chat_id=message.chat.id, user_id=hedef_id,
             permissions=ChatPermissions(can_send_messages=False), until_date=bitis_zamani
@@ -143,7 +145,6 @@ async def mute_kullanici(client, message):
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
     except Exception as e:
-        # GERÇEK HATAYI YAZDIRIYORUZ
         await message.reply_text(f"❌ **Mute İşlemi Başarısız!**\nTelegram'ın verdiği hata kodu:\n`{e}`")
 
 @app.on_message(filters.command("unmute") & filters.chat(HEDEF_GRUP_ID))
@@ -227,24 +228,20 @@ async def mesaj_kontrol(client, message):
         if message.photo or message.video:
             album_id = message.media_group_id
             
-            # 1. Kontrol: Bu mesaj bir albümün parçası mı ve albüm onaylanmış mı?
+            # Albüm onayı
             if album_id and album_id in onayli_albumler:
-                return # Albüm onaylı, silme işleminden kaç
+                return 
 
-            # 2. Kontrol: Mesajda istenen açıklama (caption) var mı?
+            # Kelime kontrolü
             if yakalandi_yazisi_var_mi(message.caption):
-                # Doğru kelime varsa ve bu bir albümse, ID'sini hafızaya kaydet
                 if album_id:
                     onayli_albumler.add(album_id)
-                    # Bellek çok dolarsa basit bir temizlik yap
                     if len(onayli_albumler) > 1000:
                         onayli_albumler.clear()
-                return # Kurallara uyuyor, silme işleminden kaç
-            
-            # 3. Kontrol: Ne albüm onaylı ne de kelime var -> Acımadan sil
+                return 
             else:
                 try: await message.delete()
                 except Exception: pass
 
-print("🚀 Nokta Atışı Yanıt Silme, Albüm Korumalı ve Hata Ayıklamalı Bot Aktif!")
+print("🚀 Bot tüm düzeltmelerle Aktif!")
 app.run()
