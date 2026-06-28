@@ -47,6 +47,9 @@ HEDEF_GRUP_ID = int(os.environ.get("HEDEF_GRUP_ID"))
 HEDEF_KONU = int(os.environ.get("HEDEF_KONU"))
 IKINCI_KONU = int(os.environ.get("IKINCI_KONU"))
 
+# --- HAFIZA DEPOLARI ---
+onayli_albumler = set()  # Albüm koruması için geçici hafıza
+
 # --- YARDIMCI FONKSİYONLAR ---
 def yakalandi_yazisi_var_mi(caption_text):
     if not caption_text: return False
@@ -111,7 +114,7 @@ async def mute_kullanici(client, message):
     if not await admin_mi(client, message): return
     
     hedef_id, kalan_args = await hedefi_dogrula(client, message, message.command[1:])
-    if not毀ef_id: return
+    if not hedef_id: return
 
     sure_delta = None; sure_yazi = "Sınırsız"; sebep = ""
     if kalan_args:
@@ -127,7 +130,6 @@ async def mute_kullanici(client, message):
             permissions=ChatPermissions(can_send_messages=False), until_date=bitis_zamani
         )
         
-        # ⭐ YENİ: Sadece yanıtlanan o spesifik mesajı siler (Hata vermemesi için korumalı)
         if message.reply_to_message:
             try: await message.reply_to_message.delete()
             except Exception: pass
@@ -166,7 +168,6 @@ async def ban_kullanici(client, message):
     try:
         await client.ban_chat_member(message.chat.id, hedef_id)
         
-        # ⭐ YENİ: Sadece yanıtlanan o spesifik mesajı siler (Hata vermemesi için korumalı)
         if message.reply_to_message:
             try: await message.reply_to_message.delete()
             except Exception: pass
@@ -214,12 +215,30 @@ async def mesaj_kontrol(client, message):
                 await message.delete()
             except Exception: pass
             return
+            
     elif aktif_konu == IKINCI_KONU:
         if is_admin: return 
         if message.photo or message.video:
-            if not yakalandi_yazisi_var_mi(message.caption):
+            album_id = message.media_group_id
+            
+            # 1. Kontrol: Bu mesaj bir albümün parçası mı ve albüm onaylanmış mı?
+            if album_id and album_id in onayli_albumler:
+                return # Albüm onaylı, silme işleminden kaç
+
+            # 2. Kontrol: Mesajda istenen açıklama (caption) var mı?
+            if yakalandi_yazisi_var_mi(message.caption):
+                # Doğru kelime varsa ve bu bir albümse, ID'sini hafızaya kaydet
+                if album_id:
+                    onayli_albumler.add(album_id)
+                    # Bellek çok dolarsa basit bir temizlik yap
+                    if len(onayli_albumler) > 1000:
+                        onayli_albumler.clear()
+                return # Kurallara uyuyor, silme işleminden kaç
+            
+            # 3. Kontrol: Ne albüm onaylı ne de kelime var -> Acımadan sil
+            else:
                 try: await message.delete()
                 except Exception: pass
 
-print("🚀 Nokta Atışı Yanıt Silme Özellikli Bot Aktif!")
+print("🚀 Nokta Atışı Yanıt Silme ve Albüm Korumalı Bot Aktif!")
 app.run()
