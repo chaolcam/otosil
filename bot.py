@@ -41,24 +41,28 @@ def web_sunucusunu_baslat():
 Thread(target=web_sunucusunu_baslat, daemon=True).start()
 
 # --- GİZLİ KEYLER ---
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-HEDEF_GRUP_ID = int(os.environ.get("HEDEF_GRUP_ID"))
-HEDEF_KONU = int(os.environ.get("HEDEF_KONU"))
-IKINCI_KONU = int(os.environ.get("IKINCI_KONU"))
+API_ID = int(os.environ.get("API_ID", 0))
+API_HASH = os.environ.get("API_HASH", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
 # --- MONGODB BAĞLANTISI VE ÖNBELLEK ---
-DB_URL = "mongodb+srv://emre252687_db_user:lE5PZFfo5RJFnOC9@cluster0.1nrcqti.mongodb.net/?appName=Cluster0"
+DB_URL = os.environ.get("MONGODB_URI")
+if not DB_URL:
+    raise ValueError("MONGODB_URI environment variable is not set!")
 db_client = motor.motor_asyncio.AsyncIOMotorClient(DB_URL)
 db = db_client["telegram_bot_db"]
 settings_col = db["settings"]
 warnings_col = db["warnings"]
+logs_col = db["logs"]
 
 cache_settings = {
     "oto_sil_suresi": 5,
     "warn_limit": 3,
-    "warn_mode": "mute_86400"
+    "warn_mode": "mute_86400",
+    "hedef_grup_id": None,
+    "hedef_konu": None,
+    "ikinci_konu": None,
+    "log_channel": None
 }
 
 async def db_init():
@@ -75,6 +79,46 @@ async def update_setting(key, value):
     global cache_settings
     cache_settings[key] = value
     await settings_col.update_one({"_id": "global"}, {"$set": {key: value}}, upsert=True)
+
+
+async def is_hedef_grup(_, __, message):
+    hedef = cache_settings.get("hedef_grup_id")
+    if not hedef:
+        return False
+    return message.chat and message.chat.id == hedef
+
+hedef_grup_filter = filters.create(is_hedef_grup)
+
+async def log_action(client, islem, hedef_kullanici, yonetici_kullanici, sebep, detay=""):
+    log_doc = {
+        "islem": islem,
+        "hedef_id": hedef_kullanici.id,
+        "hedef_isim": hedef_kullanici.first_name,
+        "yonetici_id": yonetici_kullanici.id,
+        "yonetici_isim": yonetici_kullanici.first_name,
+        "sebep": sebep,
+        "detay": detay,
+        "tarih": datetime.now()
+    }
+    await logs_col.insert_one(log_doc)
+    
+    log_channel = cache_settings.get("log_channel")
+    if log_channel:
+        hedef_link = f"[{hedef_kullanici.first_name}](tg://user?id={hedef_kullanici.id})"
+        yonetici_link = f"[{yonetici_kullanici.first_name}](tg://user?id={yonetici_kullanici.id})"
+        mesaj = f"📌 **MODERASYON İŞLEMİ**\n\n" \
+                f"🛠 **İşlem:** {islem}\n" \
+                f"👤 **Hedef:** {hedef_link} (`{hedef_kullanici.id}`)\n" \
+                f"👮 **Yönetici:** {yonetici_link} (`{yonetici_kullanici.id}`)\n" \
+                f"📝 **Sebep:** {sebep}\n" \
+                f"🕒 **Tarih:** {log_doc['tarih'].strftime('%Y-%m-%d %H:%M:%S')}"
+        if detay:
+            mesaj += f"\n📄 **Detay:** {detay}"
+        
+        try:
+            await client.send_message(log_channel, mesaj)
+        except Exception as e:
+            print(f"Log kanalına mesaj gönderilemedi: {e}")
 
 # --- HAFIZA DEPOLARI ---
 onayli_albumler = set()  # Albüm koruması için geçici hafıza
@@ -140,7 +184,58 @@ async def hedefi_dogrula(client, message, args):
         await message.reply_text(f"⚠️ **Kullanıcı Bulunamadı:** `{hedef_kullanici}` geçerli değil.\nHata Detayı: {e}")
         return None, args
 
-@app.on_message(filters.command("yardim") & filters.chat(HEDEF_GRUP_ID))
+
+def format_warn_mode(mode):
+    if mode == "mute_600": return "10 Dakika Susturma"
+    if mode == "mute_3600": return "1 Saat Susturma"
+    if mode == "mute_86400": return "1 Gün Susturma"
+    if mode == "ban_0": return "Sınırsız Ban"
+    return mode
+
+
+@app.on_message(filters.command("setgrup"))
+async def cmd_setgrup(client, message):
+    if not await admin_mi(client, message): return
+    await update_setting("hedef_grup_id", message.chat.id)
+    await message.reply_text(f"✅ Bu grup, hedef grup olarak ayarlandı! (ID: {message.chat.id})")
+
+@app.on_message(filters.command("setkonu1"))
+async def cmd_setkonu1(client, message):
+    if not await admin_mi(client, message): return
+    thread_id = getattr(message, "message_thread_id", None)
+    if not thread_id:
+        await message.reply_text("⚠️ Bu komutu bir konu (thread) içinde kullanmalısınız.")
+        return
+    await update_setting("hedef_konu", thread_id)
+    await message.reply_text(f"✅ Bu konu, Hedef Konu 1 olarak ayarlandı! (ID: {thread_id})")
+
+@app.on_message(filters.command("setkonu2"))
+async def cmd_setkonu2(client, message):
+    if not await admin_mi(client, message): return
+    thread_id = getattr(message, "message_thread_id", None)
+    if not thread_id:
+        await message.reply_text("⚠️ Bu komutu bir konu (thread) içinde kullanmalısınız.")
+        return
+    await update_setting("ikinci_konu", thread_id)
+    await message.reply_text(f"✅ Bu konu, İkinci Konu olarak ayarlandı! (ID: {thread_id})")
+
+@app.on_message(filters.command("setlog"))
+async def cmd_setlog(client, message):
+    if not await admin_mi(client, message): return
+    if len(message.command) < 2:
+        await message.reply_text("⚠️ Kullanım: `/setlog <kanal_id>`")
+        return
+    kanal_id_str = message.command[1]
+    if not kanal_id_str.startswith("-100"):
+        kanal_id_str = "-100" + kanal_id_str
+    try:
+        kanal_id = int(kanal_id_str)
+        await update_setting("log_channel", kanal_id)
+        await message.reply_text(f"✅ Log kanalı başarıyla ayarlandı: `{kanal_id}`")
+    except ValueError:
+        await message.reply_text("⚠️ Geçersiz kanal ID'si girdiniz.")
+
+ # Was @app.on_message(filters.command("yardim") & hedef_grup_filter) but I'm matching original text so:@app.on_message(filters.command("yardim") & hedef_grup_filter)
 async def cmd_yardim(client, message):
     if not await admin_mi(client, message):
         try: await message.delete()
@@ -159,7 +254,7 @@ async def cmd_yardim(client, message):
     )
     await message.reply_text(text)
 
-@app.on_message(filters.command("ayarlar") & filters.chat(HEDEF_GRUP_ID))
+@app.on_message(filters.command("ayarlar") & hedef_grup_filter)
 async def cmd_ayarlar(client, message):
     if not await admin_mi(client, message):
         try: await message.delete()
@@ -176,7 +271,7 @@ async def cmd_ayarlar(client, message):
         f"⚙️ **Bot Ayarları**\n\n"
         f"⏱ Mevcut Silme Süresi: **{cache_settings['oto_sil_suresi']} saniye**\n"
         f"⚠️ Mevcut Warn Limiti: **{cache_settings['warn_limit']}**\n"
-        f"🛑 Mevcut Ceza: **{cache_settings['warn_mode']}**",
+        f"🛑 Mevcut Ceza: **{format_warn_mode(cache_settings['warn_mode'])}**",
         reply_markup=keyboard
     )
 
@@ -208,7 +303,7 @@ async def callback_handler(client, query):
             f"⚙️ **Bot Ayarları**\n\n"
             f"⏱ Mevcut Silme Süresi: **{cache_settings['oto_sil_suresi']} saniye**\n"
             f"⚠️ Mevcut Warn Limiti: **{cache_settings['warn_limit']}**\n"
-            f"🛑 Mevcut Ceza: **{cache_settings['warn_mode']}**",
+            f"🛑 Mevcut Ceza: **{format_warn_mode(cache_settings['warn_mode'])}**",
             reply_markup=keyboard
         )
 
@@ -270,7 +365,7 @@ async def callback_handler(client, query):
         await query.message.edit_text(f"✅ Warn cezası güncellendi: **{mode_val}**", reply_markup=keyboard)
 
 
-@app.on_message(filters.command("warn") & filters.chat(HEDEF_GRUP_ID))
+@app.on_message(filters.command("warn") & hedef_grup_filter)
 async def cmd_warn(client, message):
     if not await admin_mi(client, message):
         try: await message.delete()
@@ -306,21 +401,24 @@ async def cmd_warn(client, message):
             try:
                 await client.restrict_chat_member(message.chat.id, hedef_id, permissions=kisitlama_izinleri, until_date=bitis)
                 await message.reply_text(f"🚨 {user_link} warn limitine ({limit}) ulaştı ve susturuldu!\n📝 Sebep: {sebep}")
+                await log_action(client, "Warn Limit Mute", hedef_kullanici, message.from_user, sebep, f"Limit ({limit}) aşıldı, susturuldu.")
             except Exception as e:
                 await message.reply_text(f"❌ Mute işlemi başarısız: {e}")
         elif mode == "ban_0":
             try:
                 await client.ban_chat_member(message.chat.id, hedef_id)
                 await message.reply_text(f"🚨 {user_link} warn limitine ({limit}) ulaştı ve BANLANDI!\n📝 Sebep: {sebep}")
+                await log_action(client, "Warn Limit Ban", hedef_kullanici, message.from_user, sebep, f"Limit ({limit}) aşıldı, banlandı.")
             except Exception as e:
                 await message.reply_text(f"❌ Ban işlemi başarısız: {e}")
             
         await warnings_col.delete_one({"_id": hedef_id})
     else:
         await message.reply_text(f"⚠️ {user_link} uyarıldı! [{current_warns}/{limit}]\n📝 Sebep: {sebep}")
+        await log_action(client, "Warn", hedef_kullanici, message.from_user, sebep, f"Uyarı sayısı: {current_warns}/{limit}")
 
 
-@app.on_message(filters.command("unwarn") & filters.chat(HEDEF_GRUP_ID))
+@app.on_message(filters.command("unwarn") & hedef_grup_filter)
 async def cmd_unwarn(client, message):
     if not await admin_mi(client, message):
         try: await message.delete()
@@ -336,9 +434,10 @@ async def cmd_unwarn(client, message):
 
     await warnings_col.delete_one({"_id": hedef_id})
     await message.reply_text(f"✅ {user_link} kullanıcısının tüm uyarıları sıfırlandı!")
+    await log_action(client, "Unwarn", hedef_kullanici, message.from_user, "Uyarılar sıfırlandı", "")
 
 
-@app.on_message(filters.command("mute") & filters.chat(HEDEF_GRUP_ID))
+@app.on_message(filters.command("mute") & hedef_grup_filter)
 async def mute_kullanici(client, message):
     if not await admin_mi(client, message):
         try: await message.delete()
@@ -375,10 +474,11 @@ async def mute_kullanici(client, message):
         yanit = f"🔇 {user_link} **Susturuldu!**\n⏱ **Süre:** {sure_yazi}"
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
+        await log_action(client, "Mute", hedef_kullanici, message.from_user, sebep, f"Süre: {sure_yazi}")
     except Exception as e:
         await message.reply_text(f"❌ **Mute İşlemi Başarısız!**\n`{e}`")
 
-@app.on_message(filters.command("unmute") & filters.chat(HEDEF_GRUP_ID))
+@app.on_message(filters.command("unmute") & hedef_grup_filter)
 async def unmute_kullanici(client, message):
     if not await admin_mi(client, message):
         try: await message.delete()
@@ -401,10 +501,11 @@ async def unmute_kullanici(client, message):
             )
         )
         await message.reply_text(f"🔊 {user_link} **adlı kullanıcının susturması kaldırıldı!**")
+        await log_action(client, "Unmute", hedef_kullanici, message.from_user, "Susturma kaldırıldı", "")
     except Exception as e:
         await message.reply_text(f"❌ **Unmute İşlemi Başarısız!**\n`{e}`")
 
-@app.on_message(filters.command("ban") & filters.chat(HEDEF_GRUP_ID))
+@app.on_message(filters.command("ban") & hedef_grup_filter)
 async def ban_kullanici(client, message):
     if not await admin_mi(client, message):
         try: await message.delete()
@@ -428,10 +529,11 @@ async def ban_kullanici(client, message):
         yanit = f"🔨 {user_link} **Uzaklaştırıldı!**"
         if sebep: yanit += f"\n📝 **Sebep:** {sebep}"
         await message.reply_text(yanit)
+        await log_action(client, "Ban", hedef_kullanici, message.from_user, sebep, "")
     except Exception as e:
         await message.reply_text(f"❌ **Ban İşlemi Başarısız!**\n`{e}`")
 
-@app.on_message(filters.command("unban") & filters.chat(HEDEF_GRUP_ID))
+@app.on_message(filters.command("unban") & hedef_grup_filter)
 async def unban_kullanici(client, message):
     if not await admin_mi(client, message):
         try: await message.delete()
@@ -448,6 +550,7 @@ async def unban_kullanici(client, message):
     try:
         await client.unban_chat_member(message.chat.id, hedef_id)
         await message.reply_text(f"🔓 {user_link} **adlı kullanıcının yasaklaması kaldırıldı!**")
+        await log_action(client, "Unban", hedef_kullanici, message.from_user, "Yasaklama kaldırıldı", "")
     except Exception as e:
         await message.reply_text(f"❌ **Unban İşlemi Başarısız!**\n`{e}`")
 
@@ -456,16 +559,16 @@ async def unban_kullanici(client, message):
 # --- OTOMATİK KONU TEMİZLEYİCİ ---
 # ==========================================
 
-@app.on_message(filters.chat(HEDEF_GRUP_ID) & ~filters.command(["mute", "unmute", "ban", "unban", "warn", "unwarn", "yardim", "ayarlar"]))
+@app.on_message(hedef_grup_filter & ~filters.command(["mute", "unmute", "ban", "unban", "warn", "unwarn", "yardim", "ayarlar"]))
 async def mesaj_kontrol(client, message):
     aktif_konu = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_message_id", None)
     if aktif_konu is None or aktif_konu == 0: aktif_konu = 1
-    if aktif_konu not in [HEDEF_KONU, IKINCI_KONU]: return
+    if aktif_konu not in [cache_settings.get("hedef_konu"), cache_settings.get("ikinci_konu")]: return
 
     is_admin = await admin_mi(client, message)
     oto_sil = cache_settings["oto_sil_suresi"]
 
-    if aktif_konu == HEDEF_KONU:
+    if aktif_konu == cache_settings.get("hedef_konu"):
         # Yönetici metin mesajıysa SİLME
         if is_admin and message.text and not message.photo and not message.video and not message.document and not message.audio:
             return 
@@ -477,7 +580,7 @@ async def mesaj_kontrol(client, message):
         except Exception: pass
         return
             
-    elif aktif_konu == IKINCI_KONU:
+    elif aktif_konu == cache_settings.get("ikinci_konu"):
         if is_admin: return 
         if message.photo or message.video:
             album_id = message.media_group_id
