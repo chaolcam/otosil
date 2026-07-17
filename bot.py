@@ -15,7 +15,7 @@ except RuntimeError:
     asyncio.set_event_loop(loop)
 
 from pyrogram import Client, filters
-from pyrogram.enums import ChatMemberStatus
+from pyrogram.enums import ChatMemberStatus, ChatMembersFilter
 from pyrogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 
 logging.getLogger("pyrogram").setLevel(logging.CRITICAL)
@@ -380,6 +380,52 @@ async def callback_handler(client, query):
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menü", callback_data="menu_main")]])
         await query.message.edit_text(f"✅ Warn cezası güncellendi: **{mode_val}**", reply_markup=keyboard)
 
+
+@app.on_message((filters.command(["report", "admin", "sikayet"]) | filters.regex(r"(?i)@admin")) & hedef_grup_filter)
+async def cmd_report(client, message):
+    sebep = "Sebep belirtilmedi."
+    if message.text and (message.text.startswith("/") or message.text.startswith("@")):
+        parcalar = message.text.split(" ", 1)
+        if len(parcalar) > 1:
+            sebep = parcalar[1]
+            
+    rapor_edilen_mesaj = message.reply_to_message
+    
+    try:
+        admins = []
+        async for uye in client.get_chat_members(message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
+            if not uye.user.is_bot:
+                admins.append(uye.user)
+                
+        if not admins:
+            return
+            
+        etiketler = " ".join([f"[{admin.first_name}](tg://user?id={admin.id})" for admin in admins])
+        
+        bildirim_metni = f"🚨 **ŞİKAYET BİLDİRİMİ**\n\n" \
+                         f"👤 **Bildiren:** [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n" \
+                         f"📝 **Not/Sebep:** {sebep}\n\n" \
+                         f"👥 {etiketler}"
+                         
+        await message.reply_text(bildirim_metni)
+        
+        log_channel = cache_settings.get("log_channel")
+        if log_channel:
+            log_metni = f"🚨 **YENİ ŞİKAYET!**\n\n" \
+                        f"👤 **Bildiren:** [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n" \
+                        f"📝 **Not/Sebep:** {sebep}"
+            if rapor_edilen_mesaj and rapor_edilen_mesaj.from_user:
+                log_metni += f"\n🎯 **Şikayet Edilen Kişi:** [{rapor_edilen_mesaj.from_user.first_name}](tg://user?id={rapor_edilen_mesaj.from_user.id})"
+                
+            try:
+                if rapor_edilen_mesaj:
+                    await client.forward_messages(log_channel, message.chat.id, rapor_edilen_mesaj.id)
+                await client.send_message(log_channel, log_metni)
+            except Exception as e:
+                print(f"Şikayet loga gönderilemedi: {e}")
+                
+    except Exception as e:
+        print(f"Admin etiketleme hatası: {e}")
 
 @app.on_message(filters.command("warn") & hedef_grup_filter)
 async def cmd_warn(client, message):
