@@ -196,28 +196,44 @@ def format_warn_mode(mode):
 @app.on_message(filters.command("setgrup"))
 async def cmd_setgrup(client, message):
     if not await admin_mi(client, message): return
-    await update_setting("hedef_grup_id", message.chat.id)
-    await message.reply_text(f"✅ Bu grup, hedef grup olarak ayarlandı! (ID: {message.chat.id})")
+    grup_id = message.chat.id
+    if len(message.command) > 1:
+        try: grup_id = int(message.command[1])
+        except ValueError:
+            await message.reply_text("⚠️ Geçersiz grup ID'si.")
+            return
+    await update_setting("hedef_grup_id", grup_id)
+    await message.reply_text(f"✅ Hedef grup ayarlandı! (ID: {grup_id})")
 
 @app.on_message(filters.command("setkonu1"))
 async def cmd_setkonu1(client, message):
     if not await admin_mi(client, message): return
     thread_id = getattr(message, "message_thread_id", None)
+    if len(message.command) > 1:
+        try: thread_id = int(message.command[1])
+        except ValueError:
+            await message.reply_text("⚠️ Geçersiz konu ID'si.")
+            return
     if not thread_id:
-        await message.reply_text("⚠️ Bu komutu bir konu (thread) içinde kullanmalısınız.")
+        await message.reply_text("⚠️ Bu komutu bir konu içinde kullanmalı veya ID belirtmelisiniz. (Örn: `/setkonu1 2`)")
         return
     await update_setting("hedef_konu", thread_id)
-    await message.reply_text(f"✅ Bu konu, Hedef Konu 1 olarak ayarlandı! (ID: {thread_id})")
+    await message.reply_text(f"✅ Hedef Konu 1 ayarlandı! (ID: {thread_id})")
 
 @app.on_message(filters.command("setkonu2"))
 async def cmd_setkonu2(client, message):
     if not await admin_mi(client, message): return
     thread_id = getattr(message, "message_thread_id", None)
+    if len(message.command) > 1:
+        try: thread_id = int(message.command[1])
+        except ValueError:
+            await message.reply_text("⚠️ Geçersiz konu ID'si.")
+            return
     if not thread_id:
-        await message.reply_text("⚠️ Bu komutu bir konu (thread) içinde kullanmalısınız.")
+        await message.reply_text("⚠️ Bu komutu bir konu içinde kullanmalı veya ID belirtmelisiniz. (Örn: `/setkonu2 3`)")
         return
     await update_setting("ikinci_konu", thread_id)
-    await message.reply_text(f"✅ Bu konu, İkinci Konu olarak ayarlandı! (ID: {thread_id})")
+    await message.reply_text(f"✅ İkinci Konu ayarlandı! (ID: {thread_id})")
 
 @app.on_message(filters.command("setlog"))
 async def cmd_setlog(client, message):
