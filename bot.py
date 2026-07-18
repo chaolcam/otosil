@@ -182,6 +182,13 @@ async def admin_mi(client, message):
     except:
         return False
 
+async def hedef_admin_mi(client, chat_id, user_id):
+    try:
+        uye = await client.get_chat_member(chat_id, user_id)
+        return uye.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+    except:
+        return False
+
 async def hedefi_dogrula(client, message, args):
     hedef_kullanici = None
     if message.reply_to_message:
@@ -475,6 +482,10 @@ async def cmd_warn(client, message):
 
     sebep = " ".join(kalan_args) or "Belirtilmedi"
     hedef_id = hedef_kullanici.id
+    if await hedef_admin_mi(client, message.chat.id, hedef_id):
+        await message.reply_text("⚠️ <b>Hata:</b> Yöneticilere işlem yapılamaz.")
+        return
+        
     hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
     user_link = f'<a href="tg://user?id={hedef_id}">{hedef_isim}</a>'
 
@@ -502,7 +513,10 @@ async def cmd_warn(client, message):
                 await message.reply_text(f"🚨 {user_link} warn limitine ({limit}) ulaştı ve susturuldu!\n📝 Sebep: {sebep}")
                 await log_action(client, "Warn Limit Mute", hedef_kullanici, message.from_user, sebep, f"Limit ({limit}) aşıldı, susturuldu.", chat_id)
             except Exception as e:
-                await message.reply_text(f"❌ Mute işlemi başarısız: {e}")
+                if "USER_ADMIN_INVALID" in str(e):
+                    await message.reply_text("❌ İşlem başarısız: Botun yetkisi yetersiz veya hedef bir yönetici.")
+                else:
+                    await message.reply_text(f"❌ Mute işlemi başarısız: {e}")
         elif mode == "ban_0":
             try:
                 await global_bans_col.update_one({"_id": hedef_id}, {"$set": {"sebep": f"Warn Limiti Aşımı - {sebep}"}}, upsert=True)
@@ -510,7 +524,10 @@ async def cmd_warn(client, message):
                 await message.reply_text(f"🚨 {user_link} warn limitine ({limit}) ulaştı ve GLOBAL OLARAK BANLANDI!\n📝 Sebep: {sebep}")
                 await log_action(client, "Warn Limit Global Ban", hedef_kullanici, message.from_user, sebep, f"Limit ({limit}) aşıldı, global banlandı.", chat_id)
             except Exception as e:
-                await message.reply_text(f"❌ Ban işlemi başarısız: {e}")
+                if "USER_ADMIN_INVALID" in str(e):
+                    await message.reply_text("❌ İşlem başarısız: Botun yetkisi yetersiz veya hedef bir yönetici.")
+                else:
+                    await message.reply_text(f"❌ Ban işlemi başarısız: {e}")
             
         await warnings_col.delete_one({"_id": f"{chat_id}_{hedef_id}"})
     else:
@@ -546,6 +563,10 @@ async def mute_kullanici(client, message):
     if not hedef_kullanici: return
 
     hedef_id = hedef_kullanici.id
+    if await hedef_admin_mi(client, message.chat.id, hedef_id):
+        await message.reply_text("⚠️ <b>Hata:</b> Yöneticilere işlem yapılamaz.")
+        return
+
     hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
     user_link = f'<a href="tg://user?id={hedef_id}">{hedef_isim}</a>'
 
@@ -574,7 +595,10 @@ async def mute_kullanici(client, message):
         await message.reply_text(yanit)
         await log_action(client, "Mute", hedef_kullanici, message.from_user, sebep, f"Süre: {sure_yazi}", message.chat.id)
     except Exception as e:
-        await message.reply_text(f"❌ <b>Mute İşlemi Başarısız!</b>\n<code>{e}</code>")
+        if "USER_ADMIN_INVALID" in str(e):
+            await message.reply_text("❌ <b>İşlem Başarısız!</b>\nBotun yetkisi yetersiz. Lütfen botun tam yetkili olduğundan emin olun.")
+        else:
+            await message.reply_text(f"❌ <b>Mute İşlemi Başarısız!</b>\n<code>{e}</code>")
 
 @app.on_message(filters.command("unmute") & filters.group)
 async def unmute_kullanici(client, message):
@@ -614,6 +638,10 @@ async def ban_kullanici(client, message):
     if not hedef_kullanici: return
 
     hedef_id = hedef_kullanici.id
+    if await hedef_admin_mi(client, message.chat.id, hedef_id):
+        await message.reply_text("⚠️ <b>Hata:</b> Yöneticilere işlem yapılamaz.")
+        return
+
     hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
     user_link = f'<a href="tg://user?id={hedef_id}">{hedef_isim}</a>'
     sebep = " ".join(kalan_args)
@@ -630,7 +658,10 @@ async def ban_kullanici(client, message):
         await message.reply_text(yanit)
         await log_action(client, "Global Ban", hedef_kullanici, message.from_user, sebep, "", message.chat.id)
     except Exception as e:
-        await message.reply_text(f"❌ <b>Ban İşlemi Başarısız!</b>\n<code>{e}</code>")
+        if "USER_ADMIN_INVALID" in str(e):
+            await message.reply_text("❌ <b>İşlem Başarısız!</b>\nBotun yetkisi yetersiz. Lütfen botun tam yetkili olduğundan emin olun.")
+        else:
+            await message.reply_text(f"❌ <b>Ban İşlemi Başarısız!</b>\n<code>{e}</code>")
 
 @app.on_message(filters.command("unban") & filters.group)
 async def unban_kullanici(client, message):
