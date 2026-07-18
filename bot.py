@@ -210,6 +210,23 @@ def format_warn_mode(mode):
     if mode == "ban_0": return "Sınırsız Ban"
     return mode
 
+@app.on_message(filters.command("setgrup") & filters.group)
+async def cmd_setgrup(client, message):
+    if not await admin_mi(client, message): return
+    grup_id = message.chat.id
+    if len(message.command) > 1:
+        grup_id_str = message.command[1]
+        if not grup_id_str.startswith("-100"):
+            grup_id_str = "-100" + grup_id_str
+        try: 
+            grup_id = int(grup_id_str)
+        except ValueError:
+            await message.reply_text("⚠️ Geçersiz grup ID'si.")
+            return
+    # Yalnızca botun başlatıldığını teyit etmek amaçlı
+    await update_setting(grup_id, "grup_adi", message.chat.title or "Grup") 
+    await message.reply_text(f"✅ Bu grup başarıyla botun sistemine kaydedildi ve ayarları aktif edildi! (ID: <code>{grup_id}</code>)")
+
 @app.on_message(filters.command("setkonu1") & filters.group)
 async def cmd_setkonu1(client, message):
     if not await admin_mi(client, message): return
