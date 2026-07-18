@@ -191,24 +191,31 @@ async def hedef_admin_mi(client, chat_id, user_id):
 
 async def hedefi_dogrula(client, message, args):
     hedef_kullanici = None
+    
+    if args and (args[0].isdigit() or args[0].startswith("@")):
+        hedef = args.pop(0)
+        hedef_id_veya_isim = int(hedef) if hedef.isdigit() else hedef
+        try:
+            kullanici = await client.get_users(hedef_id_veya_isim)
+            return kullanici, args
+        except Exception as e:
+            await message.reply_text(f"⚠️ <b>Kullanıcı Bulunamadı:</b> <code>{hedef}</code> geçerli değil.\nSistem Hatası: {e}")
+            return None, args
+
     if message.reply_to_message:
         if not message.reply_to_message.from_user:
             await message.reply_text("⚠️ <b>Hata:</b> Bu mesaj anonim bir yöneticiye veya kanala ait. İşlem yapılamaz.")
             return None, args
         hedef_kullanici = message.reply_to_message.from_user.id
-    else:
-        if not args:
-            await message.reply_text("⚠️ <b>Eksik Komut:</b> Lütfen bir kullanıcı adı/ID belirtin veya mesaja yanıt verin.")
+        try:
+            kullanici = await client.get_users(hedef_kullanici)
+            return kullanici, args
+        except Exception as e:
+            await message.reply_text(f"⚠️ <b>Kullanıcı Bulunamadı:</b>\nSistem Hatası: {e}")
             return None, args
-        hedef = args.pop(0)
-        hedef_kullanici = int(hedef) if hedef.isdigit() else hedef
 
-    try:
-        kullanici = await client.get_users(hedef_kullanici)
-        return kullanici, args
-    except Exception as e:
-        await message.reply_text(f"⚠️ <b>Kullanıcı Bulunamadı:</b> <code>{hedef_kullanici}</code> geçerli değil.\nHata Detayı: {e}")
-        return None, args
+    await message.reply_text("⚠️ <b>Eksik Komut:</b> Lütfen bir kullanıcı adı/ID belirtin veya mesaja yanıt verin.")
+    return None, args
 
 def format_warn_mode(mode):
     if mode == "mute_600": return "10 Dakika Susturma"
@@ -481,12 +488,12 @@ async def cmd_warn(client, message):
     if not hedef_kullanici: return
 
     sebep = " ".join(kalan_args) or "Belirtilmedi"
+    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
     hedef_id = hedef_kullanici.id
     if await hedef_admin_mi(client, message.chat.id, hedef_id):
-        await message.reply_text("⚠️ <b>Hata:</b> Yöneticilere işlem yapılamaz.")
+        await message.reply_text(f"⚠️ <b>Hata:</b> {hedef_isim} bir yönetici. Yöneticilere işlem yapılamaz.")
         return
         
-    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
     user_link = f'<a href="tg://user?id={hedef_id}">{hedef_isim}</a>'
 
     chat_id = message.chat.id
@@ -562,12 +569,12 @@ async def mute_kullanici(client, message):
     hedef_kullanici, kalan_args = await hedefi_dogrula(client, message, message.command[1:])
     if not hedef_kullanici: return
 
+    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
     hedef_id = hedef_kullanici.id
     if await hedef_admin_mi(client, message.chat.id, hedef_id):
-        await message.reply_text("⚠️ <b>Hata:</b> Yöneticilere işlem yapılamaz.")
+        await message.reply_text(f"⚠️ <b>Hata:</b> {hedef_isim} bir yönetici. Yöneticilere işlem yapılamaz.")
         return
 
-    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
     user_link = f'<a href="tg://user?id={hedef_id}">{hedef_isim}</a>'
 
     sure_delta = None; sure_yazi = "Sınırsız"; sebep = ""
@@ -637,12 +644,12 @@ async def ban_kullanici(client, message):
     hedef_kullanici, kalan_args = await hedefi_dogrula(client, message, message.command[1:])
     if not hedef_kullanici: return
 
+    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
     hedef_id = hedef_kullanici.id
     if await hedef_admin_mi(client, message.chat.id, hedef_id):
-        await message.reply_text("⚠️ <b>Hata:</b> Yöneticilere işlem yapılamaz.")
+        await message.reply_text(f"⚠️ <b>Hata:</b> {hedef_isim} bir yönetici. Yöneticilere işlem yapılamaz.")
         return
 
-    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
     user_link = f'<a href="tg://user?id={hedef_id}">{hedef_isim}</a>'
     sebep = " ".join(kalan_args)
 
