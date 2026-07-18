@@ -287,6 +287,50 @@ async def cmd_setlog(client, message):
     except ValueError:
         await message.reply_text("⚠️ Geçersiz kanal ID'si girdiniz.")
 
+@app.on_message(filters.command("info") & filters.group)
+async def cmd_info(client, message):
+    if not await admin_mi(client, message):
+        try: await message.delete()
+        except: pass
+        return
+        
+    hedef_kullanici, _ = await hedefi_dogrula(client, message, message.command[1:])
+    if not hedef_kullanici: return
+    
+    hedef_id = hedef_kullanici.id
+    hedef_isim = hedef_kullanici.first_name or "Kullanıcı"
+    user_link = f'<a href="tg://user?id={hedef_id}">{hedef_isim}</a>'
+    
+    is_banned = await global_bans_col.find_one({"_id": hedef_id})
+    ban_durumu = f"🔴 <b>BANLI (Global Kara Liste)</b>\nSebep: {is_banned.get('sebep', 'Belirtilmedi')}" if is_banned else "🟢 <b>Temiz</b>"
+    
+    chat_id = message.chat.id
+    warn_doc = await warnings_col.find_one({"_id": f"{chat_id}_{hedef_id}"})
+    uyari_sayisi = warn_doc["count"] if warn_doc else 0
+    limit = await get_setting(chat_id, "warn_limit")
+    
+    son_islemler = ""
+    async for log in logs_col.find({"hedef_id": hedef_id}).sort("tarih", -1).limit(3):
+        tarih_str = log["tarih"].strftime('%d.%m.%Y %H:%M')
+        islem = log.get("islem", "Bilinmiyor")
+        yonetici = log.get("yonetici_isim", "Yönetici")
+        sebep = log.get("sebep", "-")
+        son_islemler += f"🔹 <b>{islem}</b> ({tarih_str})\n👤 Yetkili: {yonetici} | Sebep: {sebep}\n\n"
+        
+    if not son_islemler:
+        son_islemler = "<i>Bu kullanıcıya ait geçmiş moderasyon kaydı bulunamadı.</i>"
+        
+    info_metni = (
+        f"🔍 <b>KULLANICI BİLGİSİ</b>\n\n"
+        f"👤 <b>Kullanıcı:</b> {user_link}\n"
+        f"🆔 <b>ID:</b> <code>{hedef_id}</code>\n"
+        f"🛑 <b>Ban Durumu:</b> {ban_durumu}\n"
+        f"⚠️ <b>Bu Gruptaki Uyarıları:</b> {uyari_sayisi} / {limit}\n\n"
+        f"📋 <b>Son 3 Moderasyon Kaydı:</b>\n{son_islemler}"
+    )
+    
+    await message.reply_text(info_metni, disable_web_page_preview=True)
+
 @app.on_message(filters.command("yardim") & filters.group)
 async def cmd_yardim(client, message):
     if not await admin_mi(client, message):
@@ -296,6 +340,7 @@ async def cmd_yardim(client, message):
     text = (
         "🛠 <b>Yönetici Komutları</b>\n\n"
         "🔹 <code>/ayarlar</code> - Otomatik silme süresi ve Warn limitlerini ayarlar.\n"
+        "🔹 <code>/info [kullanıcı]</code> - Kullanıcının uyarısını, banını ve kimin işlem yaptığını gösterir.\n"
         "🔹 <code>/warn [sebep]</code> - Kullanıcıya uyarı verir.\n"
         "🔹 <code>/unwarn</code> - Kullanıcının tüm uyarılarını sıfırlar.\n"
         "🔹 <code>/mute [süre] [sebep]</code> - Kullanıcıyı susturur.\n"
