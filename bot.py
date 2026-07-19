@@ -250,7 +250,7 @@ async def cmd_setgrup(client, message):
 @app.on_message(filters.command("setkonu1") & filters.group)
 async def cmd_setkonu1(client, message):
     if not await admin_mi(client, message): return
-    thread_id = getattr(message, "message_thread_id", None)
+    thread_id = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_top_message_id", None) or getattr(message, "reply_to_message_id", None)
     if len(message.command) > 1:
         try: thread_id = int(message.command[1])
         except ValueError:
@@ -265,7 +265,7 @@ async def cmd_setkonu1(client, message):
 @app.on_message(filters.command("setkonu2") & filters.group)
 async def cmd_setkonu2(client, message):
     if not await admin_mi(client, message): return
-    thread_id = getattr(message, "message_thread_id", None)
+    thread_id = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_top_message_id", None) or getattr(message, "reply_to_message_id", None)
     if len(message.command) > 1:
         try: thread_id = int(message.command[1])
         except ValueError:
@@ -750,7 +750,7 @@ async def unban_kullanici(client, message):
 
 @app.on_message(filters.group & ~filters.command(["mute", "unmute", "ban", "unban", "warn", "unwarn", "yardim", "ayarlar", "setkonu1", "setkonu2", "setlog", "report", "admin", "sikayet"]))
 async def mesaj_kontrol(client, message):
-    aktif_konu = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_message_id", None)
+    aktif_konu = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_top_message_id", None) or getattr(message, "reply_to_message_id", None)
     if aktif_konu is None or aktif_konu == 0: aktif_konu = 1
     
     chat_id = message.chat.id
