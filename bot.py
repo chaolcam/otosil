@@ -2,7 +2,7 @@ import os
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import motor.motor_asyncio
@@ -15,7 +15,7 @@ except RuntimeError:
     asyncio.set_event_loop(loop)
 
 from pyrogram import Client, filters
-from pyrogram.enums import ChatMemberStatus, ChatMembersFilter, ParseMode
+from pyrogram.enums import ChatMemberStatus, ChatMembersFilter, ParseMode, MessagesFilter
 from pyrogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 
 logging.getLogger("pyrogram").setLevel(logging.CRITICAL)
@@ -57,6 +57,7 @@ settings_col = db["settings"]
 warnings_col = db["warnings"]
 logs_col = db["logs"]
 global_bans_col = db["global_bans"]
+cleanup_col = db["daily_cleanup"]
 
 cache_settings = {}
 default_settings = {
@@ -743,10 +744,101 @@ async def unban_kullanici(client, message):
     except Exception as e:
         await message.reply_text(f"❌ <b>Unban İşlemi Başarısız!</b>\n<code>{e}</code>")
 
+@app.on_message(filters.command("temizle_test") & filters.group)
+async def cmd_temizle_test(client, message):
+    if not await admin_mi(client, message): return
+    await message.reply_text("⏳ Gece yarısı temizliği testi başlatılıyor...")
+    try:
+        cursor = cleanup_col.find({})
+        messages_by_chat = {}
+        async for doc in cursor:
+            chat_id = doc["chat_id"]
+            msg_id = doc["message_id"]
+            if chat_id not in messages_by_chat:
+                messages_by_chat[chat_id] = []
+            messages_by_chat[chat_id].append(msg_id)
+        
+        silinen_sayisi = 0
+        for chat_id, msg_ids in messages_by_chat.items():
+            try:
+                pinned_ids = set()
+                async for p_msg in client.search_messages(chat_id, filter=MessagesFilter.PINNED):
+                    pinned_ids.add(p_msg.id)
+                msg_ids_to_delete = [mid for mid in msg_ids if mid not in pinned_ids]
+            except Exception as e:
+                msg_ids_to_delete = msg_ids
+            
+            for i in range(0, len(msg_ids_to_delete), 100):
+                chunk = msg_ids_to_delete[i:i+100]
+                if not chunk: continue
+                try:
+                    await client.delete_messages(chat_id, chunk)
+                    silinen_sayisi += len(chunk)
+                except Exception:
+                    pass
+        
+        await cleanup_col.delete_many({})
+        await message.reply_text(f"✅ Gece yarısı test temizliği tamamlandı!\n🗑 Toplam silinen mesaj: {silinen_sayisi}\n📌 Sabitlenmiş mesajlara dokunulmadı.")
+    except Exception as e:
+        await message.reply_text(f"❌ Test sırasında hata oluştu: {e}")
+
 
 # ==========================================
 # --- OTOMATİK KONU TEMİZLEYİCİ ---
 # ==========================================
+
+async def save_to_daily_cleanup(chat_id, message_id):
+    try:
+        await cleanup_col.insert_one({"chat_id": chat_id, "message_id": message_id})
+    except Exception as e:
+        print(f"Cleanup kayıt hatası: {e}")
+
+async def daily_cleanup_task(client):
+    tz_tr = timezone(timedelta(hours=3))
+    while True:
+        now = datetime.now(tz_tr)
+        target = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        wait_seconds = (target - now).total_seconds()
+        
+        try:
+            await asyncio.sleep(wait_seconds)
+            
+            # Gece yarısı temizliği
+            cursor = cleanup_col.find({})
+            messages_by_chat = {}
+            async for doc in cursor:
+                chat_id = doc["chat_id"]
+                msg_id = doc["message_id"]
+                if chat_id not in messages_by_chat:
+                    messages_by_chat[chat_id] = []
+                messages_by_chat[chat_id].append(msg_id)
+            
+            for chat_id, msg_ids in messages_by_chat.items():
+                try:
+                    pinned_ids = set()
+                    async for p_msg in client.search_messages(chat_id, filter=MessagesFilter.PINNED):
+                        pinned_ids.add(p_msg.id)
+                    msg_ids_to_delete = [mid for mid in msg_ids if mid not in pinned_ids]
+                except Exception as e:
+                    print(f"Sabitlenen mesajları çekerken hata ({chat_id}): {e}")
+                    msg_ids_to_delete = msg_ids
+                
+                for i in range(0, len(msg_ids_to_delete), 100):
+                    chunk = msg_ids_to_delete[i:i+100]
+                    if not chunk: continue
+                    try:
+                        await client.delete_messages(chat_id, chunk)
+                    except Exception as e:
+                        print(f"Gece yarısı silme hatası ({chat_id}): {e}")
+            
+            await cleanup_col.delete_many({})
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"Gece yarısı görev hatası: {e}")
+            await asyncio.sleep(60) # Hata durumunda 1 dakika bekle ve devam et
 
 @app.on_message(filters.group & ~filters.command(["mute", "unmute", "ban", "unban", "warn", "unwarn", "yardim", "ayarlar", "setkonu1", "setkonu2", "setlog", "report", "admin", "sikayet"]))
 async def mesaj_kontrol(client, message):
@@ -773,10 +865,13 @@ async def mesaj_kontrol(client, message):
         return
             
     elif aktif_konu == ikinci_konu:
-        if is_admin: return 
+        if is_admin:
+            await save_to_daily_cleanup(chat_id, message.id)
+            return 
         if message.photo or message.video:
             album_id = message.media_group_id
             if album_id and album_id in onayli_albumler:
+                await save_to_daily_cleanup(chat_id, message.id)
                 return 
 
             if yakalandi_yazisi_var_mi(message.caption):
@@ -784,6 +879,7 @@ async def mesaj_kontrol(client, message):
                     onayli_albumler.add(album_id)
                     if len(onayli_albumler) > 1000:
                         onayli_albumler.clear()
+                await save_to_daily_cleanup(chat_id, message.id)
                 return 
             else:
                 try: await message.delete()
@@ -791,5 +887,6 @@ async def mesaj_kontrol(client, message):
 
 print("🚀 Bot başlatılıyor, veritabanı senkronize ediliyor...")
 loop.run_until_complete(db_init())
+loop.create_task(daily_cleanup_task(app))
 print("✅ Veritabanı bağlandı! Bot aktif.")
 app.run()
