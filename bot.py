@@ -66,7 +66,8 @@ default_settings = {
     "hedef_konu": None,
     "ikinci_konu": None,
     "log_channel": None,
-    "yedek_grup": None
+    "yedek_grup": None,
+    "yedek_konu": None
 }
 
 async def db_init():
@@ -298,15 +299,29 @@ async def cmd_setlog(client, message):
 async def cmd_setyedek(client, message):
     if not await admin_mi(client, message): return
     if len(message.command) < 2:
-        await message.reply_text("⚠️ Kullanım: <code>/setyedek &lt;grup_id&gt;</code>")
+        await message.reply_text("⚠️ Kullanım: <code>/setyedek &lt;grup_id&gt; [konu_id]</code>")
         return
     grup_id_str = message.command[1]
     if not grup_id_str.startswith("-100"):
         grup_id_str = "-100" + grup_id_str
+    
+    konu_id = None
+    if len(message.command) > 2:
+        try:
+            konu_id = int(message.command[2])
+        except ValueError:
+            await message.reply_text("⚠️ Geçersiz konu ID'si girdiniz.")
+            return
+
     try:
         grup_id = int(grup_id_str)
         await update_setting(message.chat.id, "yedek_grup", grup_id)
-        await message.reply_text(f"✅ Yedekleme grubu başarıyla ayarlandı: <code>{grup_id}</code>\nBundan sonra 1. Konuya (hedef_konu) atılan resimler silinmeden önce buraya yedeklenecek.")
+        if konu_id:
+            await update_setting(message.chat.id, "yedek_konu", konu_id)
+            await message.reply_text(f"✅ Yedekleme grubu ({grup_id}) ve Konu ({konu_id}) başarıyla ayarlandı!")
+        else:
+            await update_setting(message.chat.id, "yedek_konu", None)
+            await message.reply_text(f"✅ Yedekleme grubu başarıyla ayarlandı: <code>{grup_id}</code> (Konu belirtilmedi)")
     except ValueError:
         await message.reply_text("⚠️ Geçersiz grup ID'si girdiniz.")
 
@@ -787,6 +802,7 @@ async def mesaj_kontrol(client, message):
         if message.photo:
             yedek_grup = await get_setting(chat_id, "yedek_grup")
             if yedek_grup:
+                print(f"📷 Yedekleme tetiklendi: Chat {chat_id} -> Yedek {yedek_grup}")
                 if message.from_user:
                     user_id = message.from_user.id
                     name = message.from_user.first_name or "Kullanıcı"
@@ -798,10 +814,17 @@ async def mesaj_kontrol(client, message):
                     mention = "Bilinmeyen Kullanıcı"
                 
                 caption_text = f"Gönderen: {mention}"
+                yedek_konu = await get_setting(chat_id, "yedek_konu")
+                
                 try:
-                    await message.copy(yedek_grup, caption=caption_text)
+                    kwargs = {"chat_id": yedek_grup, "caption": caption_text}
+                    if yedek_konu:
+                        kwargs["reply_to_message_id"] = yedek_konu
+                    
+                    await message.copy(**kwargs)
+                    print("✅ Yedekleme başarılı!")
                 except Exception as e:
-                    print(f"Yedekleme hatası: {e}")
+                    print(f"❌ Yedekleme hatası: {e}")
             
         try:
             await asyncio.sleep(oto_sil)
