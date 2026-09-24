@@ -65,7 +65,8 @@ default_settings = {
     "warn_mode": "mute_86400",
     "hedef_konu": None,
     "ikinci_konu": None,
-    "log_channel": None
+    "log_channel": None,
+    "yedek_grup": None
 }
 
 async def db_init():
@@ -293,6 +294,22 @@ async def cmd_setlog(client, message):
     except ValueError:
         await message.reply_text("⚠️ Geçersiz kanal ID'si girdiniz.")
 
+@app.on_message(filters.command("setyedek") & filters.group)
+async def cmd_setyedek(client, message):
+    if not await admin_mi(client, message): return
+    if len(message.command) < 2:
+        await message.reply_text("⚠️ Kullanım: <code>/setyedek &lt;grup_id&gt;</code>")
+        return
+    grup_id_str = message.command[1]
+    if not grup_id_str.startswith("-100"):
+        grup_id_str = "-100" + grup_id_str
+    try:
+        grup_id = int(grup_id_str)
+        await update_setting(message.chat.id, "yedek_grup", grup_id)
+        await message.reply_text(f"✅ Yedekleme grubu başarıyla ayarlandı: <code>{grup_id}</code>\nBundan sonra 1. Konuya (hedef_konu) atılan resimler silinmeden önce buraya yedeklenecek.")
+    except ValueError:
+        await message.reply_text("⚠️ Geçersiz grup ID'si girdiniz.")
+
 @app.on_message(filters.command("info") & filters.group)
 async def cmd_info(client, message):
     if not await admin_mi(client, message):
@@ -354,7 +371,8 @@ async def cmd_yardim(client, message):
         "🔹 <code>/ban [sebep]</code> - Kullanıcıyı yasaklar (<b>Global Blacklist'e ekler</b>).\n"
         "🔹 <code>/unban</code> - Yasaklamayı kaldırır (<b>Blacklist'ten çıkarır</b>).\n"
         "🔹 <code>/report</code> veya <code>@admin</code> - Yöneticilere şikayette bulunur.\n"
-        "🔹 <code>/setkonu1</code>, <code>/setkonu2</code>, <code>/setlog</code> - Kurulum komutları.\n\n"
+        "🔹 <code>/setkonu1</code>, <code>/setkonu2</code>, <code>/setlog</code> - Kurulum komutları.\n"
+        "🔹 <code>/setyedek</code> - Atılan resimlerin kopyalanacağı yedekleme grubunu seçer.\n\n"
         "<i>(Mute süre formatı: 10d, 5s, 1g vb. Örn: /mute 1g Kural ihlali)</i>"
     )
     await message.reply_text(text)
@@ -765,6 +783,25 @@ async def mesaj_kontrol(client, message):
     if aktif_konu == hedef_konu:
         if is_admin and message.text and not message.photo and not message.video and not message.document and not message.audio:
             return 
+            
+        if message.photo:
+            yedek_grup = await get_setting(chat_id, "yedek_grup")
+            if yedek_grup:
+                if message.from_user:
+                    user_id = message.from_user.id
+                    name = message.from_user.first_name or "Kullanıcı"
+                    mention = f'<a href="tg://user?id={user_id}">{name}</a>'
+                elif message.sender_chat:
+                    name = message.sender_chat.title
+                    mention = f"<b>{name}</b>"
+                else:
+                    mention = "Bilinmeyen Kullanıcı"
+                
+                caption_text = f"Gönderen: {mention}"
+                try:
+                    await message.copy(yedek_grup, caption=caption_text)
+                except Exception as e:
+                    print(f"Yedekleme hatası: {e}")
             
         try:
             await asyncio.sleep(oto_sil)
