@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import motor.motor_asyncio
+import pyrogram
 
 # --- PYTHON 3.14+ YAMASI ---
 try:
@@ -17,6 +18,7 @@ except RuntimeError:
 from pyrogram import Client, filters
 from pyrogram.enums import ChatMemberStatus, ChatMembersFilter, ParseMode
 from pyrogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.raw import functions, types
 
 logging.getLogger("pyrogram").setLevel(logging.CRITICAL)
 
@@ -150,6 +152,114 @@ loop.set_exception_handler(susturucu)
 app = Client("silici_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 
 # ==========================================
+# --- 3 SAATLİK OTO KONU YENİLEME ---
+# ==========================================
+
+async def yenile_konuyu(client, chat_id, konu_ismi, ilk_mesaj):
+    # 1. Eski konuyu sil
+    eski_konu_id = await get_setting(chat_id, "ikinci_konu")
+    if eski_konu_id:
+        try:
+            await client.invoke(
+                functions.channels.DeleteTopicHistory(
+                    channel=await client.resolve_peer(chat_id),
+                    top_msg_id=eski_konu_id
+                )
+            )
+        except Exception as e:
+            print(f"Eski konu silinemedi (Belki zaten silinmiştir): {e}")
+
+    # 2. Yeni konu oluştur
+    try:
+        result = await client.invoke(
+            functions.channels.CreateForumTopic(
+                channel=await client.resolve_peer(chat_id),
+                title=konu_ismi
+            )
+        )
+        
+        new_topic_id = None
+        for update in result.updates:
+            if isinstance(update, types.UpdateMessageID):
+                new_topic_id = update.id
+                break
+            elif hasattr(update, "message") and hasattr(update.message, "id"):
+                new_topic_id = update.message.id
+                break
+                
+        if new_topic_id:
+            # İkinci Konu ayarını güncelle
+            await update_setting(chat_id, "ikinci_konu", new_topic_id)
+            
+            # Konuyu başa sabitle (Pin topic)
+            try:
+                await client.invoke(
+                    functions.channels.UpdatePinnedForumTopic(
+                        channel=await client.resolve_peer(chat_id),
+                        topic_id=new_topic_id,
+                        pinned=True
+                    )
+                )
+            except Exception as e:
+                print(f"Konu sabitlenemedi: {e}")
+                
+            # İlk mesajı yolla ve sabitle
+            try:
+                msg = await client.send_message(chat_id, ilk_mesaj, reply_to_message_id=new_topic_id)
+                await client.pin_chat_message(chat_id, msg.id)
+            except Exception as e:
+                print(f"İlk mesaj gönderilemedi veya sabitlenemedi: {e}")
+                
+            return new_topic_id
+    except Exception as e:
+        print(f"Yeni konu açılamadı: {e}")
+        
+    return None
+
+async def topic_yenile_loop(client):
+    while True:
+        await asyncio.sleep(10800)  # 3 Saat Bekle
+        try:
+            # Döngüdeki tüm gruplar için işle
+            async for s in settings_col.find({"oto_konu_isim": {"$exists": True}}):
+                chat_id = s["_id"]
+                konu_ismi = s["oto_konu_isim"]
+                ilk_mesaj = s["oto_konu_mesaj"]
+                await yenile_konuyu(client, chat_id, konu_ismi, ilk_mesaj)
+        except Exception as e:
+            print(f"Döngü hatası: {e}")
+
+@app.on_message(filters.command("otokonukur") & filters.group)
+async def cmd_otokonukur(client, message):
+    if not await admin_mi(client, message): return
+    
+    parts = message.text.split(" ", 1)
+    if len(parts) < 2 or "|" not in parts[1]:
+        await message.reply_text(
+            "⚠️ <b>Kullanım Hatası</b>\n"
+            "Lütfen konunun adını ve ilk mesajı <code>|</code> işaretiyle ayırarak yazın.\n\n"
+            "Örnek:\n<code>/otokonukur İfşalar | Kurallar: 1- Küfür yasak, 2- Link yasak</code>"
+        )
+        return
+        
+    konu_ismi, ilk_mesaj = parts[1].split("|", 1)
+    konu_ismi = konu_ismi.strip()
+    ilk_mesaj = ilk_mesaj.strip()
+    
+    await update_setting(message.chat.id, "oto_konu_isim", konu_ismi)
+    await update_setting(message.chat.id, "oto_konu_mesaj", ilk_mesaj)
+    
+    bilgi_mesaji = await message.reply_text("⏳ Eski konu silinip, belirlediğiniz isimle yenisi açılıyor. Lütfen bekleyin...")
+    
+    new_id = await yenile_konuyu(client, message.chat.id, konu_ismi, ilk_mesaj)
+    
+    if new_id:
+        await bilgi_mesaji.edit_text(f"✅ <b>Konu Başarıyla Kuruldu!</b> (ID: <code>{new_id}</code>)\n\nBundan sonra her 3 saatte bir bu konu otomatik silinecek, aynı isimle baştan açılacak ve mesajınız başa tutturulacak.")
+    else:
+        await bilgi_mesaji.edit_text("❌ İşlem sırasında bir hata oluştu. (Bota tam yetki verdiğinizden emin olun)")
+
+
+# ==========================================
 # --- GLOBAL BAN (BLACKLIST) ---
 # ==========================================
 
@@ -243,7 +353,6 @@ async def cmd_setgrup(client, message):
         except ValueError:
             await message.reply_text("⚠️ Geçersiz grup ID'si.")
             return
-    # Yalnızca botun başlatıldığını teyit etmek amaçlı
     await update_setting(grup_id, "grup_adi", message.chat.title or "Grup") 
     await message.reply_text(f"✅ Bu grup başarıyla botun sistemine kaydedildi ve ayarları aktif edildi! (ID: <code>{grup_id}</code>)")
 
@@ -257,7 +366,7 @@ async def cmd_setkonu1(client, message):
             await message.reply_text("⚠️ Geçersiz konu ID'si.")
             return
     if not thread_id:
-        await message.reply_text("⚠️ Bu komutu bir konu içinde kullanmalı veya ID belirtmelisiniz. (Örn: <code>/setkonu1 2</code>)")
+        await message.reply_text("⚠️ Bu komutu bir konu içinde kullanmalı veya ID belirtmelisiniz.")
         return
     await update_setting(message.chat.id, "hedef_konu", thread_id)
     await message.reply_text(f"✅ Hedef Konu 1 ayarlandı! (ID: {thread_id})")
@@ -272,7 +381,7 @@ async def cmd_setkonu2(client, message):
             await message.reply_text("⚠️ Geçersiz konu ID'si.")
             return
     if not thread_id:
-        await message.reply_text("⚠️ Bu komutu bir konu içinde kullanmalı veya ID belirtmelisiniz. (Örn: <code>/setkonu2 3</code>)")
+        await message.reply_text("⚠️ Bu komutu bir konu içinde kullanmalı veya ID belirtmelisiniz.")
         return
     await update_setting(message.chat.id, "ikinci_konu", thread_id)
     await message.reply_text(f"✅ İkinci Konu ayarlandı! (ID: {thread_id})")
@@ -354,6 +463,7 @@ async def cmd_yardim(client, message):
         "🔹 <code>/ban [sebep]</code> - Kullanıcıyı yasaklar (<b>Global Blacklist'e ekler</b>).\n"
         "🔹 <code>/unban</code> - Yasaklamayı kaldırır (<b>Blacklist'ten çıkarır</b>).\n"
         "🔹 <code>/report</code> veya <code>@admin</code> - Yöneticilere şikayette bulunur.\n"
+        "🔹 <code>/otokonukur</code> - 3 saatte bir yenilenen otomatik konu kurar.\n"
         "🔹 <code>/setkonu1</code>, <code>/setkonu2</code>, <code>/setlog</code> - Kurulum komutları.\n\n"
         "<i>(Mute süre formatı: 10d, 5s, 1g vb. Örn: /mute 1g Kural ihlali)</i>"
     )
@@ -748,7 +858,7 @@ async def unban_kullanici(client, message):
 # --- OTOMATİK KONU TEMİZLEYİCİ ---
 # ==========================================
 
-@app.on_message(filters.group & ~filters.command(["mute", "unmute", "ban", "unban", "warn", "unwarn", "yardim", "ayarlar", "setkonu1", "setkonu2", "setlog", "report", "admin", "sikayet"]))
+@app.on_message(filters.group & ~filters.command(["mute", "unmute", "ban", "unban", "warn", "unwarn", "yardim", "ayarlar", "setkonu1", "setkonu2", "setlog", "report", "admin", "sikayet", "otokonukur"]))
 async def mesaj_kontrol(client, message):
     aktif_konu = getattr(message, "message_thread_id", None) or getattr(message, "reply_to_top_message_id", None) or getattr(message, "reply_to_message_id", None)
     if aktif_konu is None or aktif_konu == 0: aktif_konu = 1
@@ -788,7 +898,6 @@ async def mesaj_kontrol(client, message):
                     reply_to_message_id=yedek_konu, 
                     caption=caption_text
                 )
-                print("✅ Yedekleme başarılı!")
             except Exception as e:
                 print(f"❌ Yedekleme hatası: {e}")
             
@@ -815,7 +924,19 @@ async def mesaj_kontrol(client, message):
                 try: await message.delete()
                 except Exception: pass
 
-print("🚀 Bot başlatılıyor, veritabanı senkronize ediliyor...")
-loop.run_until_complete(db_init())
-print("✅ Veritabanı bağlandı! Bot aktif.")
-app.run()
+
+# Başlatma Mantığı
+async def main():
+    print("🚀 Bot başlatılıyor, veritabanı senkronize ediliyor...")
+    await db_init()
+    print("✅ Veritabanı bağlandı! Bot aktif.")
+    
+    await app.start()
+    
+    # 3 Saatlik Döngüyü Arkaplanda Başlat
+    asyncio.create_task(topic_yenile_loop(app))
+    
+    await pyrogram.idle()
+    await app.stop()
+
+loop.run_until_complete(main())
