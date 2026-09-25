@@ -170,10 +170,12 @@ async def yenile_konuyu(client, chat_id, konu_ismi, ilk_mesaj):
 
     # 2. Yeni konu oluştur
     try:
+        import random
         result = await client.invoke(
             functions.channels.CreateForumTopic(
                 channel=await client.resolve_peer(chat_id),
-                title=konu_ismi
+                title=konu_ismi,
+                random_id=random.randint(1, 999999999999)
             )
         )
         
