@@ -212,8 +212,9 @@ async def yenile_konuyu(client, chat_id, konu_ismi, ilk_mesaj):
             return new_topic_id
     except Exception as e:
         print(f"Yeni konu açılamadı: {e}")
+        return str(e)
         
-    return None
+    return "Bilinmeyen bir hata oluştu (Konu ID'si bulunamadı)."
 
 async def topic_yenile_loop(client):
     while True:
@@ -252,10 +253,10 @@ async def cmd_otokonukur(client, message):
     
     new_id = await yenile_konuyu(client, message.chat.id, konu_ismi, ilk_mesaj)
     
-    if new_id:
+    if isinstance(new_id, int):
         await bilgi_mesaji.edit_text(f"✅ <b>Konu Başarıyla Kuruldu!</b> (ID: <code>{new_id}</code>)\n\nBundan sonra her 3 saatte bir bu konu otomatik silinecek, aynı isimle baştan açılacak ve mesajınız başa tutturulacak.")
     else:
-        await bilgi_mesaji.edit_text("❌ İşlem sırasında bir hata oluştu. (Bota tam yetki verdiğinizden emin olun)")
+        await bilgi_mesaji.edit_text(f"❌ İşlem sırasında bir hata oluştu.\nDetay: <code>{new_id}</code>")
 
 
 # ==========================================
