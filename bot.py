@@ -6,15 +6,14 @@ from datetime import datetime, timedelta
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import motor.motor_asyncio
-import pyrogram
-
 # --- PYTHON 3.14+ YAMASI ---
 try:
-    loop = asyncio.get_running_loop()
+    loop = asyncio.get_event_loop()
 except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+import pyrogram
 from pyrogram import Client, filters
 from pyrogram.enums import ChatMemberStatus, ChatMembersFilter, ParseMode
 from pyrogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
